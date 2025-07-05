@@ -6,5 +6,5 @@
 
 # Ramaining functions
 ```@autodocs
-Modules = [TimeVaryingPeriodograms]
+Modules = [BOOP]
 ```
