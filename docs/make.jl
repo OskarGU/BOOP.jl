@@ -6,7 +6,7 @@ DocMeta.setdocmeta!(BOOP, :DocTestSetup, :(using BOOP); recursive=true)
 makedocs(;
     modules=[BOOP],
     authors="Oskar Gustafsson < oskar.gstfssn@gmail.com >",
-    repo="https://github.com/OskarGU/BOOP.jl/blob/{commit}{path}#{line}", # Added this line
+    repo="https://github.com/OskarGU/BOOP.jl/blob/{commit}{path}#{line}", 
     sitename="BOOP.jl",
     format=Documenter.HTML(;
         canonical="https://OskarGU.github.io/BOOP.jl",
