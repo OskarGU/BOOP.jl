@@ -1,0 +1,13 @@
+name = "BOOP"
+uuid = "3bb2f618-3363-4713-be1c-d56221b75334"
+authors = ["Oskar Gustafsson"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.11.5"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
