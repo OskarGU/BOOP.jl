@@ -11,6 +11,3 @@ This is a get starting message to see that every thing works and we can add stuf
 ```@index
 ```
 
-```@autodocs
-Modules = [BOOP]
-```
