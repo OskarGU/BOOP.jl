@@ -8,4 +8,6 @@ using GaussianProcesses
 include("FirstFunc.jl")
 export first_func
 
+include("acquisitionfunctions.jl")
+export expected_improvement
 end
