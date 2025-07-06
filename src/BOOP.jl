@@ -9,5 +9,8 @@ include("FirstFunc.jl")
 export first_func
 
 include("acquisitionfunctions.jl")
-export expected_improvement
+export expected_improvement, upper_confidence_bound
+
+
+
 end
