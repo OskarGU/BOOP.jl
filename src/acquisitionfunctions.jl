@@ -1,6 +1,28 @@
 # This file contain acquisition functions that can be used in the Bayesian optimization.
 
-# Expected Improvement (EI) acquisition function
+""" 
+```
+  expected_improvement(gp, xnew, ybest; ξ = 0.10)
+```
+Computes the expected improvement given a Gaussian process ()'gp') object, and the earliest best evaluation ('ybest') at the new evaluation point ('xnew').
+
+Returns the expected improvement at 'xnew'.
+# Examples
+```julia-repl
+julia> Set up GP model.
+julia> X_train = [1.0, 2.5, 4.0]; julia> y_train = [sin(x) for x in X_train];
+julia> gp_model = GP(X_train', y_train, MeanZero(), SE(0.0, 0.0));
+julia> optimize!(gp_model);
+
+julia> # 2. Define the best observed value and a candidate point
+julia> y_best = minimum(y_train);
+julia> x_candidate = 3.0;
+
+julia> # 3. Compute Expected Improvement
+julia> ei = expected_improvement(gp_model, x_candidate, y_best; ξ=0.01)
+≈ 4.89.
+```
+""" 
 function expected_improvement(gp, xnew, ybest; ξ = 0.10)
     xvec = xnew isa Number ? [xnew] : xnew
     xvec = reshape(xvec, :, 1)
