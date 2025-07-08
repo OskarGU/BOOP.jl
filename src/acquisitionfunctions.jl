@@ -1,4 +1,5 @@
 # This file contain acquisition functions that can be used in the Bayesian optimization.
+# Note that all functions are defined in order to minimiza a function!
 
 """ 
 ```
@@ -32,8 +33,8 @@ function expected_improvement(gp, xnew, ybest; ξ = 0.10)
     Z = Δ ./ σ
     Φ = cdf.(Normal(), Z)
     ϕ = pdf.(Normal(), Z)
-    ei = Δ .* Φ .+ σ .* ϕ
-    return ei[1]
+    ei =  Δ .* Φ .+ σ .* ϕ
+    return -ei[1]
 end
 
 

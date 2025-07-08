@@ -1,10 +1,8 @@
 
 
 using GaussianProcesses
-using Random
-using Optim
-using Distributions
-using Plots
+using Random, Optim, Distributions, Plots
+using BOOP
 
 # Set random seed for reproducibility
 Random.seed!(123)
@@ -13,9 +11,6 @@ Random.seed!(123)
 f(x) = sin(3x) + 0.5x^2 - x + 0.2randn()
 fNf(x) = sin(3x) + 0.5x^2 - x 
 
-# Rescaling functions used for GP to ensure inputs are in a suitable range. (Easier to set lengthscales and mor robust optimization).
-rescale(x, lo, hi) = 2 * (x .- lo) ./ (hi - lo) .- 1
-inv_rescale(x, lo, hi) = 0.5 * (x .+ 1) * (hi - lo) .+ lo
 
 # Bounds
 lo, hi = -5.0, 5.0
@@ -48,13 +43,16 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
 
 )
 
-optimizationSettings = (nIter=3, ξ=0.2,  n_restarts=20, bounds=(-1.0, 1.0), acq=expected_improvement)
+optimizationSettings = (nIter=14, tuningPar=0.02,  n_restarts=20, bounds=(-1.0, 1.0), acq=expected_improvement)
+optimizationSettings = (nIter=14, tuningPar=2.,  n_restarts=20, bounds=(-1.0, 1.0), acq=upper_confidence_bound)
+
 
 
 warmStart = (X, y)
 warmStart = (XO, yO)
 
 gpO, XO, yO = BO(f, modelSettings, optimizationSettings, warmStart)
+
 
 ##################
 
@@ -67,10 +65,10 @@ x_plot_scaled = rescale(x_plot_array, lo, hi);
 x_plot_scaled_matrix = reshape(x_plot_scaled, 1, :);
 
 # Predict from GP
-μ, σ² = predict_y(gpO, x_plot_scaled_matrix);
+μ, σ² = predict_f(gpO, x_plot_scaled_matrix);
 
 # Plot in original coordinates
-plot(x_plot, μ; ribbon=sqrt.(σ²), label="GP prediction", lw=2, xlab);
+plot(x_plot, μ; ribbon=sqrt.(σ²), label="GP prediction", lw=2, xlabel="x");
 plot!(x_plot, fNf.(x_plot), label="True function f(x)", lw=2);
 xlabel!("x")
 ylabel!("f(x)")

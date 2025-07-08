@@ -11,6 +11,9 @@ export first_func
 include("acquisitionfunctions.jl")
 export expected_improvement, upper_confidence_bound
 
+include("bayesoptfunctions.jl")
+export BO, rescale, inv_rescale, propose_next
+
 
 
 end
