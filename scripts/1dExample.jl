@@ -55,7 +55,7 @@ gpO, XO, yO = BO(f, modelSettings, optimizationSettings, warmStart)
 
 
 ##################
-
+# Probably make plots to one function and put it in a "plotUtils" script.
 # Create a dense grid in the original input space
 x_plot = range(lo, hi, length=200);
 x_plot_array = collect(x_plot);  # needed for broadcasting
