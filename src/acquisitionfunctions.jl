@@ -1,5 +1,5 @@
 # This file contain acquisition functions that can be used in the Bayesian optimization.
-# Note that all functions are defined in order to minimiza a function!
+# Note that all functions are defined in order to minimize a function!
 
 """ 
 ```
