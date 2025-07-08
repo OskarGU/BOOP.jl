@@ -52,6 +52,10 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
                  kernelBounds = KB, noiseBounds=NB, xdim=d, xBounds=[lo, hi]
 
 )
+
+
+# The results are quite sensitive to the tuning parameter in the 2d case. 
+# Especially ucb is sensitive.
 optimizationSettings = (nIter=20, tuningPar=0.2,  n_restarts=20, bounds=(-1.0, 1.0), 
                         acq=expected_improvement
 )
