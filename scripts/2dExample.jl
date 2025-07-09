@@ -56,7 +56,7 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
 
 # The results are quite sensitive to the tuning parameter in the 2d case. 
 # Especially ucb is sensitive.
-optimizationSettings = (nIter=20, tuningPar=0.2,  n_restarts=20, bounds=(-1.0, 1.0), 
+optimizationSettings = (nIter=10, tuningPar=0.05,  n_restarts=20, bounds=(-1.0, 1.0), 
                         acq=expected_improvement
 )
 
@@ -67,12 +67,6 @@ optimizationSettings = (nIter=20, tuningPar=3.5,  n_restarts=20, bounds=(-1.0, 1
 warmStart = (X, y)
 warmStart = (XO, yO)
 gpO, XO, yO = BO(f, modelSettings, optimizationSettings, warmStart)
-
-
-
-
-
-
 
 # Create grid for plotting
 xx = range(bounds[1], bounds[2], length=100)
