@@ -119,18 +119,24 @@ functions. This implementation uses Monte Carlo simulation to approximate the ex
 - `Float64`: The negative Knowledge Gradient value. It is returned as negative because
   standard optimizers perform minimization, and we want to maximize the acquisition function.
 """
-function knowledge_gradient(gp::GPE, xnew::Vector{Float64}, domain_points::Matrix{Float64}; n_samples::Int=20)
+
+function knowledge_gradient(gp::GPE, xnew, lower, upper; n_samples::Int=20)
+    xvec = xnew isa Number ? [xnew] : xnew
+    xnew = reshape(xvec, :, 1)
     # 1. Find the minimum of the *current* posterior mean. This is our baseline.
     # We find it by evaluating the posterior mean over our discretized domain.
-    μ_current, _ = predict_f(gp, domain_points)
-    min_μ_current = minimum(μ_current)
+    #μ_current, _ = predict_f(gp, domain_points)
+    #min_μ_current = minimum(μ_current)
+    μ_current(x) = predict_f(gp, reshape(x, :, 1))[1][1]
+    min_μ_current = multi_start_minimize(μ_current, lb, ub; n_starts=40)
+
 
     # 2. Get the predictive distribution at the candidate point `xnew`.
     # This tells us what we expect to observe if we sample there.
-    μ_new_point, σ²_new_point = predict_f(gp, reshape(xnew, :, 1))
+    μ_new_point, σ²_new_point = predict_y(gp, reshape(xnew, :, 1))
+   
     # Add model noise to the predictive variance for simulating a noisy observation
-    σ_total = sqrt(σ²_new_point[1] + gp.noise)
-    predictive_dist = Normal(μ_new_point[1], max(σ_total, 1e-6))
+    predictive_dist = Normal(μ_new_point[1], sqrt(max(σ²_new_point[1], 1e-6)))
 
     # 3. Run Monte Carlo simulation to estimate the expected future minimum.
     future_minimums = zeros(n_samples)
@@ -140,7 +146,7 @@ function knowledge_gradient(gp::GPE, xnew::Vector{Float64}, domain_points::Matri
 
         # b. Create a temporary, updated GP model by "fantasizing" that we
         #    observed (xnew, y_sample).
-        x_updated = hcat(gp.x, reshape(xnew, :, 1))
+        x_updated = hcat(gp.x, xnew)
         y_updated = vcat(gp.y, y_sample)
 
         # Re-fit the GP with this new fantasized data point.
@@ -149,8 +155,10 @@ function knowledge_gradient(gp::GPE, xnew::Vector{Float64}, domain_points::Matri
         gp_fantasy = GPE(x_updated, y_updated, gp.mean, gp.kernel, gp.logNoise)
 
         # c. Find the minimum of the posterior mean of this *new* fantasy GP.
-        μ_fantasy, _ = predict_f(gp_fantasy, domain_points)
-        future_minimums[i] = minimum(μ_fantasy)
+        #μ_fantasy, _ = predict_f(gp_fantasy, domain_points)
+        #future_minimums[i] = minimum(μ_fantasy)
+        μ_fantasy(x) = predict_f(gp_fantasy, reshape(x, :, 1))[1][1]
+        future_minimums[i] = multi_start_minimize(μ_fantasy, lb, ub; n_starts=10)
     end
 
     # 4. Calculate the expected value of the future minimum by averaging the simulations.
@@ -164,38 +172,62 @@ function knowledge_gradient(gp::GPE, xnew::Vector{Float64}, domain_points::Matri
     return -kg
 end
 
-# --- Example Usage ---
-#=
-# 1. Define a problem
-f(x) = (x[1]-2)^2 + randn() * 0.5 # Noisy 1D objective
-lb = -2.0 # Lower bound
-ub = 6.0   # Upper bound
+"""
+    multi_start_minimize(f, lower, upper; n_starts=20)
 
-# 2. Initial Data
-n_initial = 5
-X_train = reshape(range(lb, ub, length=n_initial), 1, :)
-Y_train = [f(x) for x in eachcol(X_train)]
+Performs multi-start constrained optimization using `Fminbox` with `BFGS()` to minimize the objective function `f` over the box-constrained domain defined by `lower` and `upper`. Supports both 1D and multi-dimensional inputs.
 
-# 3. Create and fit GP model
-mZero = MeanZero()
-kern = SE(0.0, 0.0) # Kernel with trainable hyperparameters
-logNoise = -1.0 # log(sqrt(noise))
-gp = GPE(X_train, Y_train, mZero, kern, logNoise)
-optimize!(gp) # Optimize hyperparameters
+The algorithm initializes `n_starts` evenly spread starting points within the domain and selects the best minimum found across all runs.
 
-# 4. Define domain for finding posterior minimum
-domain = reshape(collect(range(lb, ub, length=200)), 1, :)
+# Arguments
+- `f::Function`: The function to minimize.
+- `lower::Union{Number, AbstractVector}`: Lower bound(s) of the search domain.
+- `upper::Union{Number, AbstractVector}`: Upper bound(s) of the search domain.
+- `n_starts::Int`: Number of starting points. Defaults to 20.
 
-# 5. Find the next point to sample using KG
-# We need to wrap the acquisition function for the optimizer
-acquisition_func(x) = knowledge_gradient(gp, x, domain)
+# Returns
+- `Float64`: The minimum value of `f` found across all runs.
 
-# Use an optimizer (e.g., from Optim.jl) to find the point that maximizes KG
-# (minimizes -KG)
-result = optimize(acquisition_func, [lb], [ub], [3.0], Fminbox(BFGS()))
-x_next = Optim.minimizer(result)
+# Examples
+```julia-repl
+julia> f(x) = sum((x .- 1.0).^2)
+julia> minimum = multi_start_minimize(f, [-5.0, -5.0], [5.0, 5.0], n_starts=10)
+0.0
 
-println("Current GP state optimized.")
-println("Next point to sample according to KG: ", x_next)
-println("KG value at that point: ", -Optim.minimum(result))
-=#
+julia> g(x) = (x[1] - 2)^2 + sin(5x[1])
+julia> minimum = multi_start_minimize(g, -3.0, 3.0, n_starts=15)
+-0.3784012476539641
+function multi_start_minimize(f, lower, upper; n_starts=20)
+      if !isa(lower, AbstractVector)
+        lower = [lower]
+        upper = [upper]
+    end
+    dim = length(lower)
+    # Generate evenly spaced starting points in each dimension
+    starts = [lower .+ (upper .- lower) .* ((i .+ 0.5) ./ n_starts) for i in 0:(n_starts - 1)]
+
+    mins = Float64[]
+    for x0 in starts
+        res = optimize(f, lower, upper, x0, Fminbox(BFGS()))
+        push!(mins, Optim.minimum(res))
+    end
+    return minimum(mins)
+end
+"""
+
+function multi_start_minimize(f, lower, upper; n_starts=20)
+      if !isa(lower, AbstractVector)
+        lower = [lower]
+        upper = [upper]
+    end
+    dim = length(lower)
+    # Generate evenly spaced starting points in each dimension
+    starts = [lower .+ (upper .- lower) .* ((i .+ 0.5) ./ n_starts) for i in 0:(n_starts - 1)]
+
+    mins = Float64[]
+    for x0 in starts
+        res = optimize(f, lower, upper, x0, Fminbox(BFGS()))
+        push!(mins, Optim.minimum(res))
+    end
+    return minimum(mins)
+end
