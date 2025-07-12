@@ -128,7 +128,7 @@ function knowledge_gradient(gp::GPE, xnew, lower, upper; n_samples::Int=20)
     #μ_current, _ = predict_f(gp, domain_points)
     #min_μ_current = minimum(μ_current)
     μ_current(x) = predict_f(gp, reshape(x, :, 1))[1][1]
-    min_μ_current = multi_start_minimize(μ_current, lb, ub; n_starts=40)
+    min_μ_current = multi_start_minimize(μ_current, lower, upper; n_starts=40)
 
 
     # 2. Get the predictive distribution at the candidate point `xnew`.
@@ -158,7 +158,7 @@ function knowledge_gradient(gp::GPE, xnew, lower, upper; n_samples::Int=20)
         #μ_fantasy, _ = predict_f(gp_fantasy, domain_points)
         #future_minimums[i] = minimum(μ_fantasy)
         μ_fantasy(x) = predict_f(gp_fantasy, reshape(x, :, 1))[1][1]
-        future_minimums[i] = multi_start_minimize(μ_fantasy, lb, ub; n_starts=10)
+        future_minimums[i] = multi_start_minimize(μ_fantasy, lower, upper; n_starts=10)
     end
 
     # 4. Calculate the expected value of the future minimum by averaging the simulations.
