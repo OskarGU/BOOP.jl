@@ -61,9 +61,9 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
     
     
         # Get current best y
-        ybest = minimum(y)
+        #ybest = minimum(y)
         #ybest = posterior_min(gp, bounds, d)
-        #ybest = posteriorMinObs(gp, Xscaled)
+        ybest = posteriorMinObs(gp, Xscaled)
         # Propose next point
         x_next = propose_next(gp, ybest, d=modelSettings.xdim, n_restarts=20, acq=optimizationSettings.acq, tuningPar=optimizationSettings.tuningPar)
                  #propose_next(gp, ybest; bounds=(-1.0, 1.0), d=1, n_restarts=20, acq=expected_improvement, ξ = 0.10)
