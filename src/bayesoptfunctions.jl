@@ -1,5 +1,6 @@
 # Propose next point using multiple random restarts
-function propose_next(gp, ybest; bounds=(-1.0, 1.0), d=1, n_restarts=20, acq=expected_improvement, tuningPar = 0.10)
+function propose_next(gp, ybest; n_restarts=20, acq=expected_improvement, tuningPar = 0.10)
+    d = gp.dim
     best_val = Inf
     best_x = zeros(d)
     function objective_function(x)
@@ -13,9 +14,9 @@ function propose_next(gp, ybest; bounds=(-1.0, 1.0), d=1, n_restarts=20, acq=exp
     end
 
     for _ in 1:n_restarts
-        x0 = rand(Uniform(bounds[1], bounds[2]), d)
+        x0 = rand(Uniform(-1., 1.), d)
         res = optimize(objective_function,
-                       bounds[1] * ones(d), bounds[2] * ones(d), x0,
+                       -1. * ones(d), 1. * ones(d), x0,
                        Fminbox(LBFGS()); autodiff = :forward)
         if res.minimum < best_val
             best_val = res.minimum
@@ -27,16 +28,19 @@ function propose_next(gp, ybest; bounds=(-1.0, 1.0), d=1, n_restarts=20, acq=exp
 end
 
 # Function to find the minimum of the posterior mean even in unvisited points.
-function posterior_min(gp, bounds, d; n_restarts=20)
+function posterior_min(gp; n_restarts=20)
     best_val = Inf
+    d = gp.dim
     best_x = zeros(d)
 
-    acq_mean(x) = predict_f(gp, x)[1][1]
+    #acq_mean(x) = predict_f(gp, x)[1][1]
+    acq_mean(x) = predict_f(gp, reshape(x, d, 1))[1][1]
+
 
     for _ in 1:n_restarts
-        x0 = rand(d) .* (bounds[2] - bounds[1]) .+ bounds[1]
+        x0 = rand(d) .* 2. .- 1.  
         res = optimize(acq_mean,
-                       bounds[1] * ones(d), bounds[2] * ones(d),
+                       -1. * ones(d), 1. * ones(d),
                        x0, Fminbox(LBFGS()); autodiff = :forward)
         if res.minimum < best_val
             best_val = res.minimum
@@ -55,8 +59,14 @@ end
 
 
 # Rescaling functions used for GP to ensure inputs are in a suitable range. (Easier to set lengthscales and mor robust optimization).
-rescale(x, lo, hi) = 2 * (x .- lo) ./ (hi - lo) .- 1
-inv_rescale(x, lo, hi) = 0.5 * (x .+ 1) * (hi - lo) .+ lo
+#rescale(x, lo, hi) = 2 * (x .- lo) ./ (hi - lo) .- 1¨
+function rescale(X, lo, hi)
+    # X is n×d matrix, lo and hi are length-d vectors
+    return 2 .* (X .- lo') ./ (hi' .- lo') .- 1
+end
+
+inv_rescale(X_scaled, lo, hi) = ((X_scaled .+ 1) ./ 2) .* (hi' .- lo') .+ lo'
+#inv_rescale(x, lo, hi) = 0.5 * (x .+ 1) .* (hi - lo) .+ lo
 
 
 ####################
@@ -76,9 +86,9 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
         #ybest = posterior_min(gp, bounds, d).fX_min
         ybest = posteriorMinObs(gp, Xscaled)
         # Propose next point
-        x_next = propose_next(gp, ybest, d=modelSettings.xdim, n_restarts=20, acq=optimizationSettings.acq, tuningPar=optimizationSettings.tuningPar)
-                 #propose_next(gp, ybest; bounds=(-1.0, 1.0), d=1, n_restarts=20, acq=expected_improvement, ξ = 0.10)
-        xNextRescaled = inv_rescale(x_next, modelSettings.xBounds[1], modelSettings.xBounds[2])  # Rescale back to original bounds
+        x_next = propose_next(gp, ybest, n_restarts=20, acq=optimizationSettings.acq, tuningPar=optimizationSettings.tuningPar)
+                 #propose_next(gp, ybest; n_restarts=20, acq=expected_improvement, ξ = 0.10)
+        xNextRescaled = inv_rescale(x_next[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]  # Rescale back to original bounds
         if(modelSettings.xdim ==1) y_next = f(xNextRescaled[1])
           else y_next = f(xNextRescaled)
         end
@@ -94,7 +104,7 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
     optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=500)) 
 
     # (1) Global posterior mean minimum (can be unobserved)
-    objectMinimizer_scaled = posterior_min(gp, [-1, 1], modelSettings.xdim).X_min
+    objectMinimizer_scaled = posterior_min(gp).X_min
     objectMinimizer = inv_rescale(objectMinimizer_scaled, modelSettings.xBounds[1], modelSettings.xBounds[2])
     
     # (2) Minimum over observed X points
@@ -102,8 +112,6 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
     minIdx = argmin(μ)
     postMinObserved_scaled = Xscaled[minIdx, :]
     postMinObserved = inv_rescale(postMinObserved_scaled, modelSettings.xBounds[1], modelSettings.xBounds[2])
-    #postMinObservedY = μ[minIdx]
-    #objectMinimizer = inv_rescale(posterior_min(gp, [-1,1], modelSettings.xdim), modelSettings.xBounds[1], modelSettings.xBounds[2])
-    #postMinObserved = inv_rescale(posteriorMinObs(gp, Xscaled), modelSettings.xBounds[1], modelSettings.xBounds[2])
-    return gp, X, y, objectMinimizer, postMinObserved
+    postMinObservedY = μ[minIdx]
+    return gp, X, y, objectMinimizer, postMinObserved, postMinObservedY 
 end
