@@ -39,8 +39,6 @@ bounds = (lower, upper)
 X = hcat([rand(Uniform(l, u), 5) for (l, u) in zip(bounds[1], bounds[2])]...) 
 y = [f(vec(X[i, :])) for i in 1:size(X, 1)]
 
-# Rescale to 0,1
-hi = 5.; lo=-5.
 
 d=2
 mean1 = MeanConst(0.0)

@@ -1,3 +1,4 @@
+# WARNING: this example has to be updated to fit the new BO algorithm. see 2d example.
 Random.seed!(123)
 using LinearAlgebra
 # 3D Gaussian mixture PDF
