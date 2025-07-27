@@ -30,10 +30,13 @@ end
 
 # Initialize parameters
 d = 2
-bounds = (-5.0, 5.0)
+lower=[-5,-7]
+upper=[6,7]
+bounds = (lower, upper)
 
 # Initial design: 5 random points in 2D within bounds
-X = rand(Uniform(bounds[1], bounds[2]), 5, d)
+# Sample 5 points in d dimensions
+X = hcat([rand(Uniform(l, u), 5) for (l, u) in zip(bounds[1], bounds[2])]...) 
 y = [f(vec(X[i, :])) for i in 1:size(X, 1)]
 
 # Rescale to 0,1
@@ -46,31 +49,29 @@ logNoise1 = log(1e-1)              # low noise since pdf is deterministic
 KB = [[-3, -3., -8], [3, 3., 8]];
 NB = [-6., 3.];
 
-lo=-5.; hi=5.;
 
 modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1, 
-                 kernelBounds = KB, noiseBounds=NB, xdim=d, xBounds=[lo, hi]
+                 kernelBounds = KB, noiseBounds=NB, xdim=d, xBounds=bounds
 
 )
 
 
 # The results are quite sensitive to the tuning parameter in the 2d case. 
 # Especially ucb is sensitive.
-optimizationSettings = (nIter=10, tuningPar=0.05,  n_restarts=20, bounds=(-1.0, 1.0), 
-                        acq=expected_improvement
-)
+optimizationSettings = (nIter=10, tuningPar=0.05,  n_restarts=20, acq=expected_improvement)
 
-optimizationSettings = (nIter=20, tuningPar=3.5,  n_restarts=20, bounds=(-1.0, 1.0), 
-                        acq=upper_confidence_bound
-)
+optimizationSettings = (nIter=20, tuningPar=3.5,  n_restarts=20,acq=upper_confidence_bound)
 
 warmStart = (X, y)
 warmStart = (XO, yO)
-gpO, XO, yO = BO(f, modelSettings, optimizationSettings, warmStart)
+gpO, XO, yO, objMin, obsMin = BO(f, modelSettings, optimizationSettings, warmStart)
+
+
+    
 
 # Create grid for plotting
-xx = range(bounds[1], bounds[2], length=100)
-yy = range(bounds[1], bounds[2], length=100)
+xx = range(bounds[1][1], bounds[2][1], length=100)
+yy = range(bounds[1][2], bounds[2][2], length=100)
 
 # Compute true function on grid
 Z_true = [gaussian_mixture_pdf([x,y]) for y in yy, x in xx]  # (y,x) indexing for heatmap
@@ -78,7 +79,7 @@ Z_true = [gaussian_mixture_pdf([x,y]) for y in yy, x in xx]  # (y,x) indexing fo
 # Predict GP mean on grid
 grid_points = [[x, y] for y in yy, x in xx]
 X_grid = reduce(hcat, grid_points)  # 2 x 10000
-μ, _ = predict_f(gpO, rescale.(X_grid', lo, hi)')
+μ, _ = predict_f(gpO, rescale(X_grid', bounds[1], bounds[2])')
 Z_gp = reshape(μ, 100, 100)'
 
 # Plot true function heatmap

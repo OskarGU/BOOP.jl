@@ -43,10 +43,8 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
 
 )
 
-optimizationSettings = (nIter=15, tuningPar=0.02,  n_restarts=20, 
-                        bounds=(-1.0, 1.0), acq=expected_improvement
-)
-optimizationSettings = (nIter=15, tuningPar=2.,  n_restarts=20, bounds=(-1.0, 1.0), acq=upper_confidence_bound)
+optimizationSettings = (nIter=15, tuningPar=0.02,  n_restarts=20, acq=expected_improvement)
+optimizationSettings = (nIter=15, tuningPar=2.,  n_restarts=20, acq=upper_confidence_bound)
 
 
 
