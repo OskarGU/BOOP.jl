@@ -8,8 +8,8 @@ using BOOP
 Random.seed!(123)
 
 # Define black-box objective function (you can change this!)
-f(x) = sin(3x) + 0.5x^2 - x + 0.2randn()
-fNf(x) = sin(3x) + 0.5x^2 - x 
+f(x) = 1.5*sin(3x) + 0.5x^2 - x + 0.2randn()
+fNf(x) = 1.5*sin(3x) + 0.5x^2 - x 
 
 
 # Bounds
@@ -43,16 +43,19 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
 
 )
 
-optimizationSettings = (nIter=14, tuningPar=0.02,  n_restarts=20, bounds=(-1.0, 1.0), acq=expected_improvement)
-optimizationSettings = (nIter=14, tuningPar=2.,  n_restarts=20, bounds=(-1.0, 1.0), acq=upper_confidence_bound)
+optimizationSettings = (nIter=15, tuningPar=0.02,  n_restarts=20, 
+                        bounds=(-1.0, 1.0), acq=expected_improvement
+)
+optimizationSettings = (nIter=15, tuningPar=2.,  n_restarts=20, bounds=(-1.0, 1.0), acq=upper_confidence_bound)
 
 
 
 warmStart = (X, y)
 warmStart = (XO, yO)
 
-gpO, XO, yO = BO(f, modelSettings, optimizationSettings, warmStart)
+gpO, XO, yO, objMin, obsMin  = BO(f, modelSettings, optimizationSettings, warmStart)
 
+    
 
 ##################
 # Probably make plots to one function and put it in a "plotUtils" script.
@@ -74,6 +77,9 @@ xlabel!("x")
 ylabel!("f(x)")
 title!("GP vs True Function")
 scatter!(XO, yO, label="Samples", color=:black)
+
+vline!([obsMin], label="Observed Minimum", color=:red, linestyle=:dash)
+vline!([objMin], label="Objective Minimum", color=:blue, linestyle=:dash)
 
 ###################
 
