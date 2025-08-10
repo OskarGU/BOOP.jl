@@ -35,7 +35,7 @@ domain = reshape(collect(range(lb, ub, length=200)), 1, :)
 
 # 5. Find the next point to sample using KG
 # We need to wrap the acquisition function for the optimizer
-acquisition_func(xnew) = knowledge_gradient(gp, xnew[1], -2., 6., n_samples=500)
+acquisition_func(xnew) = knowledge_gradient(gp, xnew[1], -2., 6., n_samples=450)
 
 @time acquisition_func(1.2)
 
@@ -58,105 +58,152 @@ println("KG value at that point: ", -Optim.minimum(result))
 
 
 
-############################################
-# Discrete knowledge Gradient
-using GaussianProcesses
+
+
+#################################
+################################
 using Distributions
+using GaussianProcesses
 using LinearAlgebra
 using Statistics
 
-# Ensure you have a standard Normal distribution object available
-const Normal_0_1 = Normal(0.0, 1.0)
-
+# ==============================================================================
+#  1. The Robust, Standalone KG Algorithm (from our previous conversation)
+# ==============================================================================
 """
-Computes the Knowledge Gradient analytically for a candidate point `xnew`
-over a discretized domain.
-
-This version avoids Monte Carlo simulation by using the closed-form expression
-for the expected value of the minimum of a set of Gaussian variables.
-
-# Arguments
-- `gp::GPE`: The current Gaussian Process model.
-- `xnew`: The candidate point at which to evaluate the KG.
-- `domain_points`: A matrix representing the discretized domain.
-
-# Returns
-- A `Float64` representing the negative Knowledge Gradient value.
+Calculates E[max(μ + σZ)] where Z ~ N(0,1).
+This is the stable, core algorithm.
 """
-function knowledge_gradient_analytic_discrete(gp::GPE, xnew, domain_points)
-    # Ensure xnew and domain_points are correctly shaped matrices
-    xnew_mat = reshape(xnew isa Number ? [xnew] : xnew, :, 1)
-    domain_mat = reshape(domain_points, :, size(gp.x, 1))
-    
-    # 1. Find the minimum of the *current* posterior mean over the discretized domain.
-    μ_current, Σ_current = predict_f(gp, domain_mat'; full_cov=true)
-    min_μ_current = minimum(μ_current)
-
-    # 2. Get the predictive distribution at the candidate point `xnew`.
-    # This is the distribution of a future *noisy* observation y.
-    μ_new_point, σ²_new_point = predict_y(gp, xnew_mat)
-    σ_new_point = sqrt(max(σ²_new_point[1], 1e-9))
-
-    # 3. Calculate the update vector. This vector determines how the posterior mean
-    #    at all domain points changes in response to an observation at xnew.
-    #    It's derived from the GP posterior update equations.
-    cov_dx = vcat([cov(gp.kernel, [domain_mat[i];;], xnew_mat) for i in 1:length(domain_mat)]...) # Covariance between domain and xnew
-    # The update vector v = K(X, x_*) / (K(x_*, x_*) + σ_n²)
-    update_vector = cov_dx ./ (σ²_new_point[1]) # Note: predict_y's variance includes noise
-
-    # The fantasy mean is μ_fantasy = μ_current + update_vector * (y_sample - μ_new_point)
-    # Let y_sample = μ_new_point + σ_new_point * Z, where Z ~ N(0,1)
-    # Then μ_fantasy = μ_current + update_vector * (σ_new_point * Z)
-    # This is a set of Gaussians whose minimum we need to find the expectation of.
-    
-    # 4. Compute the expected future minimum analytically.
-    # Let u_i = μ_current[i] and v_i = update_vector[i] * σ_new_point
-    # We want E[min_i(u_i + v_i*Z)]
-    u = vec(μ_current)
-    v = vec(update_vector) .* σ_new_point
-    
-    # Sort by slopes v_i to efficiently calculate the expectation
-    p = sortperm(v)
-    u_sorted, v_sorted = u[p], v[p]
-    
-    expected_min_μ_future = 0.0
-    # The formula involves summing over segments where each line is the minimum.
-    # The crossing points of lines u_i + v_i*z and u_j + v_j*z are z_ij = (u_i - u_j) / (v_j - v_i)
-    z_vals = -Inf
-    
-    for i in 1:length(u)-1
-        z_next = (u_sorted[i] - u_sorted[i+1]) / (v_sorted[i+1] - v_sorted[i])
-        
-        # Integrate E[u_i + v_i*Z] from z_vals to z_next
-        # Integral of (u+v*z)*phi(z)dz = u*(cdf(b)-cdf(a)) - v*(pdf(b)-pdf(a))
-        cdf_z_next = cdf(Normal_0_1, z_next)
-        cdf_z_vals = cdf(Normal_0_1, z_vals)
-
-        pdf_z_next = pdf(Normal_0_1, z_next)
-        pdf_z_vals = pdf(Normal_0_1, z_vals)
-        
-        term1 = u_sorted[i] * (cdf_z_next - cdf_z_vals)
-        term2 = v_sorted[i] * (pdf_z_vals - pdf_z_next) # Note the order
-        
-        expected_min_μ_future += term1 + term2
-        z_vals = z_next
+function knowledge_gradient_discrete(μ::Vector{Float64}, σ::Vector{Float64})
+    if length(μ) != length(σ)
+        error("Input vectors μ and σ must have the same length.")
+    end
+    d = length(μ)
+    if d == 0
+        return 0.0
+    elseif d == 1
+        return 0.0 # KG is E[max] - max, for one line this is E[μ+σZ] - μ = 0
     end
     
-    # Add the final interval from the last z_vals to +Inf
-    cdf_z_vals = cdf(Normal_0_1, z_vals)
-    pdf_z_vals = pdf(Normal_0_1, z_vals)
+    O = sortperm(σ)
+    μ_sorted, σ_sorted = μ[O], σ[O]
     
-    term1_last = u_sorted[end] * (1.0 - cdf_z_vals)
-    term2_last = v_sorted[end] * (pdf_z_vals) # pdf(+inf) is 0
-    expected_min_μ_future += term1_last + term2_last
+    I = [1, 2]
+    Z_tilde = [-Inf, (μ_sorted[1] - μ_sorted[2]) / (σ_sorted[2] - σ_sorted[1])]
 
-    # 5. The Knowledge Gradient is the improvement.
-    kg = min_μ_current - expected_min_μ_future
-
-    # 6. Return negative for maximization.
-    return -kg
+    for i in 3:d
+        while true
+            j = last(I)
+            z = (μ_sorted[j] - μ_sorted[i]) / (σ_sorted[i] - σ_sorted[j])
+            if z >= last(Z_tilde)
+                push!(I, i)
+                push!(Z_tilde, z)
+                break
+            else
+                pop!(I)
+                pop!(Z_tilde)
+                if isempty(I)
+                    push!(I, i); push!(Z_tilde, -Inf); break
+                end
+            end
+        end
+    end
+    
+    push!(Z_tilde, Inf)
+    norm_dist = Normal(0, 1)
+    
+    z_upper, z_lower = Z_tilde[2:end], Z_tilde[1:end-1]
+    
+    A_vec = pdf.(norm_dist, z_lower) - pdf.(norm_dist, z_upper)
+    
+    B_vec = cdf.(norm_dist, z_upper) - cdf.(norm_dist, z_lower)
+    
+    μ_I, σ_I = μ_sorted[I], σ_sorted[I]
+    
+    expected_max = (B_vec' * μ_I) + (A_vec' * σ_I)
+    max_μ_current = maximum(μ)
+    
+    return expected_max - max_μ_current
 end
 
 
-domain_points = range(-2.0, 6.0, length=600) # Discretized domain for KG evaluation
-knowledge_gradient_analytic_discrete(gp::GPE, 2.1, domain_points)
+# ==============================================================================
+#  2. The New High-Level Wrapper Function (your plan)
+# ==============================================================================
+
+"""
+Computes the Knowledge Gradient acquisition function for a multi-dimensional GP.
+
+This version correctly handles multi-dimensional inputs by expecting `domain_points`
+to be a D x d matrix.
+"""
+function kg_acquisition_function_multid(gp::GPE, xnew::Vector{Float64}, domain_points::Matrix{Float64})
+    # --- Step A: Get GP-specific values ---
+    
+    # Get the current posterior mean over the discrete domain points.
+    # FIX: Removed incorrect transpose. `domain_points` is already in the correct D x d format.
+    μ_current, _ = predict_f(gp, domain_points)
+    
+    # Get the predictive distribution of a noisy observation y at xnew.
+    xnew_mat = reshape(xnew, :, 1)
+    _, σ²_y_new = predict_y(gp, xnew_mat)
+    σ_y_new = sqrt(max(σ²_y_new[1], 1e-12))
+
+    # Calculate the covariance vector between the domain points and xnew.
+    # FIX: Removed incorrect transpose here as well.
+    K_domain_xnew = cov(gp.kernel, domain_points, xnew_mat)
+
+    # This vector describes the change in the posterior mean.
+    update_vector = K_domain_xnew ./ σ²_y_new[1]
+
+    # --- Step B: Construct μ and σ for the core algorithm ---
+    μ = vec(μ_current)
+    σ = vec(update_vector) .* σ_y_new
+    
+    # --- Step C: Call the robust, standalone algorithm ---
+    kg_value = knowledge_gradient_discrete(μ, σ)
+    
+    return kg_value
+end
+
+# 1. Example Setup for a 2D GP
+# Let's assume your GP takes 2D inputs.
+# The observed data would have dimensions: x_obs (2 x N), y_obs (N,)
+D = 2 # Number of dimensions
+num_obs = 10
+x_obs_2d = rand(D, num_obs) * 10
+y_obs_2d = [sin(x[1]) + cos(x[2]) for x in eachcol(x_obs_2d)]
+
+# Create and optimize a 2D GP model
+# Note the use of `SEArd` for Automatic Relevance Determination per dimension.
+kernel_2d = SEArd(zeros(D), 0.0) 
+gp_2d = GP(x_obs_2d, y_obs_2d, MeanConst(0.0), kernel_2d, -2.0)
+# optimize!(gp_2d) # You would normally optimize the hyperparameters
+
+# 2. Create a 2D grid for the `domain_points`
+pts_per_dim = 10
+x1_range = range(0, 10, length=pts_per_dim);
+x2_range = range(0, 10, length=pts_per_dim);
+
+# Create the grid by collecting all combinations
+grid_points = hcat([[x1, x2] for x1 in x1_range for x2 in x2_range]...);
+# `grid_points` is now a 2 x 400 matrix (D x d), which is the required format.
+
+# 3. Use the multi-dimensional acquisition function
+# Let's test a candidate point
+x_candidate_2d = [2.5, 7.5];
+
+# Calculate the KG value
+@time kg = kg_acquisition_function_multid(gp_2d, x_candidate_2d, grid_points);
+
+println("KG value at $(x_candidate_2d): ", kg)
+
+
+KGSug = 1:0.2:10
+KGEval=[]
+for i in 1:length(KGSug)
+    push!(KGEval, kg_acquisition_function_multid(gp_2d, [KGSug[i], 7.5], grid_points))
+    print(i)
+end
+
+plot!(KGSug, KGEval)
