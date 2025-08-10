@@ -161,6 +161,10 @@ end
 
 
 
+"""
+Performs multi-start minimization and returns both the minimum value
+and the location (argmin) where it was found.
+"""
 function multi_start_minimize(f, lower, upper; n_starts=20)
      if !isa(lower, AbstractVector)
          lower = [lower]
@@ -169,31 +173,35 @@ function multi_start_minimize(f, lower, upper; n_starts=20)
      dim = length(lower)
      starts = [lower .+ (upper .- lower) .* ((i .+ 0.5) ./ n_starts) for i in 0:(n_starts - 1)]
 
-     mins = Float64[]
+     best_min = Inf
+     best_argmin = similar(lower)
+
      for x0 in starts
          res = optimize(f, lower, upper, x0, Fminbox(BFGS()))
-         push!(mins, Optim.minimum(res))
+         if Optim.minimum(res) < best_min
+            best_min = Optim.minimum(res)
+            best_argmin = Optim.minimizer(res)
+         end
      end
-     return minimum(mins)
+     return (best_min, best_argmin)
 end
 
 
+# 2. Modify the maximize helper to pass through both results
 """
-    multi_start_maximize(f, lower, upper; n_starts=20)
-
-Performs multi-start constrained optimization to MAXIMIZE the objective function `f`.
-It works by minimizing the negative of the function `f`.
+Performs multi-start maximization and returns both the maximum value
+and the location (argmax) where it was found.
 """
 function multi_start_maximize(f, lower, upper; n_starts=20)
-    # To maximize f(x), we can simply minimize -f(x).
     objective_to_minimize = x -> -f(x)
     
-    # Use your existing multi_start_minimize function to find the minimum of -f(x).
-    min_val = multi_start_minimize(objective_to_minimize, lower, upper; n_starts=n_starts)
+    # Get both the minimum value and the argmin from the helper
+    min_val, argmin_x = multi_start_minimize(objective_to_minimize, lower, upper; n_starts=n_starts)
     
-    # The maximum of f(x) is the negative of the minimum of -f(x).
-    return -min_val
+    # The maximum is -min_val, and the argmax is the same as the argmin of the negative function
+    return (-min_val, argmin_x)
 end
+
 
 
 ##########################
