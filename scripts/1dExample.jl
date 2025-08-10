@@ -8,8 +8,8 @@ using BOOP
 Random.seed!(123)
 
 # Define black-box objective function (you can change this!)
-f(x) = 1.5*sin(3x) + 0.5x^2 - x + 0.2randn()
-fNf(x) = 1.5*sin(3x) + 0.5x^2 - x 
+f(x) = -(1.5*sin(3x) + 0.5x^2 - x + 0.2randn())
+fNf(x) = -(1.5*sin(3x) + 0.5x^2 - x )
 
 
 # Bounds
@@ -43,7 +43,7 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
 
 )
 
-optimizationSettings = (nIter=15, tuningPar=0.02,  n_restarts=20, acq=expected_improvement)
+optimizationSettings = (nIter=5, tuningPar=0.02,  n_restarts=20, acq=expected_improvement)
 optimizationSettings = (nIter=15, tuningPar=2.,  n_restarts=20, acq=upper_confidence_bound)
 
 
