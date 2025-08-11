@@ -13,7 +13,7 @@ function gaussian_mixture_pdf_3d(x::Vector{Float64})
     return 20 * (w1 * pdf(p1, x) + w2 * pdf(p2, x))
 end
 
-f(x) = -gaussian_mixture_pdf_3d(x) + 0.05randn()
+f(x) = gaussian_mixture_pdf_3d(x) + 0.05randn()
 
 # Setup
 d = 3
@@ -27,10 +27,10 @@ y = [f(vec(X[i, :])) for i in 1:size(X, 1)]
 
 # GP model settings
 mean1 = MeanConst(0.0)
-kernel1 = Mat52Ard(3 * ones(d), 1.0)
+kernel1 = Mat52Ard(1. * ones(d), 1.0)
 logNoise1 = log(1e-1)
-KB = [[-3.0, -3.0, -3.0, -8.0], [3.0, 3.0, 3.0, 8.0]]
-NB = [-6.0, 3.0]
+KB = [[-3.0, -3.0, -3.0, -5.0], [1.5, 1.5, 1.5, 3.0]]
+NB = [-6.0, 1.0]
 
 modelSettings = (
     mean=mean1,

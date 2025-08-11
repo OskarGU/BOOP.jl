@@ -1,5 +1,5 @@
 # Propose next point using multiple random restarts
-function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuningPar = 0.10)
+function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuningPar = 0.10, bounds=nothing)
     d = gp.dim
     best_acq_val = -Inf # Start at -Inf because we're looking for a maximum
     best_x = zeros(d)
@@ -10,6 +10,12 @@ function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuning
             val = acq(gp, x, f_max; ξ=tuningPar)
         elseif acq == upper_confidence_bound
             val = acq(gp, x; κ=tuningPar)
+        elseif acq == knowledge_gradient
+            # Check if bounds were provided, as KG needs them
+            if bounds === nothing
+                error("Knowledge Gradient requires 'bounds' to be provided.")
+            end
+            val = acq(gp, x, bounds[1], bounds[2])
         else
             error("Unknown acquisition function: $acq")
         end
@@ -68,18 +74,25 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
     Xscaled = rescale(X, modelSettings.xBounds[1], modelSettings.xBounds[2])
 
     for i in 1:optimizationSettings.nIter
-        # The GP models the original y values directly for a maximization problem
-        gp = GP(Xscaled', y[:], modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
+        # --- NEW: Standardize y-values at the start of the loop ---
+        μ_y = mean(y)
+        # Use max to set a minimum standard deviation (jitter) in one line
+        σ_y = max(std(y), 1e-6)
+        y_scaled = (y .- μ_y) ./ σ_y
+        
+        # Train the GP on the STANDARDIZED y-values
+        gp = GP(Xscaled', y_scaled, modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
         optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=100))
     
-        # Get current best y by finding the MAXIMUM of observed values.
-        f_max = maximum(y)
+        # Get the current best STANDARDIZED y-value
+        f_max_scaled = maximum(y_scaled)
 
-        # Propose next point by MAXIMIZING the acquisition function
-        x_next_scaled = propose_next(gp, f_max,
+        # Propose the next point using the GP trained on scaled data
+        x_next_scaled = propose_next(gp, f_max_scaled,
                                      n_restarts=optimizationSettings.n_restarts,
                                      acq=optimizationSettings.acq,
-                                     tuningPar=optimizationSettings.tuningPar) 
+                                     tuningPar=optimizationSettings.tuningPar,
+                                     bounds=modelSettings.xBounds)
         
         # Rescale back to original bounds to evaluate the true function
         x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
@@ -92,7 +105,7 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
             y_next = f(x_next_original)
         end
 
-        # Add new data to dataset
+        # Add the new ORIGINAL y-value to the dataset
         X = vcat(X, x_next_original')
         Xscaled = vcat(Xscaled, x_next_scaled')
         y = vcat(y, y_next)
@@ -100,11 +113,15 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
         println("Iter $i: x = $(round.(x_next_original, digits=3)), y = $(round(y_next, digits=3))")
     end
 
-    # Final GP model on all data
-    gp = GP(Xscaled', y[:], modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
+    # --- Final GP model on all data ---
+    # Standardize final y-data before fitting the final model
+    μ_y_final = mean(y)
+    # Use max to set a minimum standard deviation (jitter) in one line
+    σ_y_final = max(std(y), 1e-6)
+    y_scaled_final = (y .- μ_y_final) ./ σ_y_final
+    
+    gp = GP(Xscaled', y_scaled_final, modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
     optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=500))
-
-    # --- Final Results, now finding MAXIMA ---
 
     # (1) Global posterior mean maximum (can be unobserved)
     final_posterior_max_result = posterior_max(gp; n_starts=40)
@@ -112,14 +129,74 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
     objectMaximizer = inv_rescale(objectMaximizer_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
 
     # (2) Maximum over points with the highest posterior mean among observed points
-    μ, _ = predict_f(gp, Xscaled')
-    maxIdx = argmax(μ)
+    μ_scaled, _ = predict_f(gp, Xscaled')
+    maxIdx = argmax(μ_scaled)
     postMaxObserved_scaled = Xscaled[maxIdx, :]
     postMaxObserved = inv_rescale(postMaxObserved_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
-    postMaxObservedY = μ[maxIdx]
+    
+    # --- NEW: Rescale the final predicted mean back to the original y-scale ---
+    postMaxObservedY_scaled = μ_scaled[maxIdx]
+    postMaxObservedY = postMaxObservedY_scaled * σ_y_final + μ_y_final
     
     return gp, X, y, objectMaximizer, postMaxObserved, postMaxObservedY
 end
+#function BO(f, modelSettings, optimizationSettings, warmStart)
+#    X, y = warmStart
+#    Xscaled = rescale(X, modelSettings.xBounds[1], modelSettings.xBounds[2])
+#
+#    for i in 1:optimizationSettings.nIter
+#        # The GP models the original y values directly for a maximization problem
+#        gp = GP(Xscaled', y[:], modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
+#        optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=100))
+#    
+#        # Get current best y by finding the MAXIMUM of observed values.
+#        f_max = maximum(y)
+#
+#        # Propose next point by MAXIMIZING the acquisition function
+#        x_next_scaled = propose_next(gp, f_max,
+#                                     n_restarts=optimizationSettings.n_restarts,
+#                                     acq=optimizationSettings.acq,
+#                                     tuningPar=optimizationSettings.tuningPar) 
+#        
+#        # Rescale back to original bounds to evaluate the true function
+#        x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
+#        
+#        # Handle 1D vs multi-D function calls
+#        y_next = 0.0
+#        if modelSettings.xdim == 1
+#            y_next = f(x_next_original[1])
+#        else
+#            y_next = f(x_next_original)
+#        end
+#
+#        # Add new data to dataset
+#        X = vcat(X, x_next_original')
+#        Xscaled = vcat(Xscaled, x_next_scaled')
+#        y = vcat(y, y_next)
+#    
+#        println("Iter $i: x = $(round.(x_next_original, digits=3)), y = $(round(y_next, digits=3))")
+#    end
+#
+#    # Final GP model on all data
+#    gp = GP(Xscaled', y[:], modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
+#    optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=500))
+#
+#    # --- Final Results, now finding MAXIMA ---
+#
+#    # (1) Global posterior mean maximum (can be unobserved)
+#    final_posterior_max_result = posterior_max(gp; n_starts=40)
+#    objectMaximizer_scaled = final_posterior_max_result.X_max
+#    objectMaximizer = inv_rescale(objectMaximizer_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
+#
+#    # (2) Maximum over points with the highest posterior mean among observed points
+#    μ, _ = predict_f(gp, Xscaled')
+#    maxIdx = argmax(μ)
+#    postMaxObserved_scaled = Xscaled[maxIdx, :]
+#    postMaxObserved = inv_rescale(postMaxObserved_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
+#    postMaxObservedY = μ[maxIdx]
+#    
+#    return gp, X, y, objectMaximizer, postMaxObserved, postMaxObservedY
+#end
 
 ####################
 # Main BO function:

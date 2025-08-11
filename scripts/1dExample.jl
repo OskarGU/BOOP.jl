@@ -13,10 +13,10 @@ fNf(x) = -(1.5*sin(3x) + 0.5x^2 - x )
 
 
 # Bounds
-lo, hi = -5.0, 5.0
+lo, hi = -4.0, 5.0
 
 # Initial design points (column vector form)
-X = reshape([-2.5, 0.0, 2.0], :, 1)
+X = reshape([-2.5, 0.0, 4.0], :, 1)
 y = f.(X)
 Xscaled= rescale(X, lo, hi)
 
@@ -30,10 +30,10 @@ d=1
 mean1 = MeanConst(0.0)
 kernel1 = Mat52Ard(3*ones(d), 1.0)  # lengthscale zeros means will be optimized
 logNoise1 = log(1e-1)              # low noise since pdf is deterministic
-KB = [[-3, -8], [3, 8]];
+KB = [[-3, -5], [3, 3]];
 NB = [-6., 3.];
 
-lo=-5.; hi=5.;
+lo=-4.; hi=5.;
 
 # Number of optimization iterations
 nIter = 1
@@ -43,15 +43,15 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
 
 )
 
-optimizationSettings = (nIter=5, tuningPar=0.02,  n_restarts=20, acq=expected_improvement)
-optimizationSettings = (nIter=15, tuningPar=2.,  n_restarts=20, acq=upper_confidence_bound)
+optimizationSettings = (nIter=1, tuningPar=0.02,  n_restarts=20, acq=expected_improvement)
+optimizationSettings = (nIter=5, tuningPar=2.,  n_restarts=20, acq=upper_confidence_bound)
 
 
 
-warmStart = (X, y)
+warmStart = (X, y[:])
 warmStart = (XO, yO)
 
-gpO, XO, yO, objMin, obsMin  = BO(f, modelSettings, optimizationSettings, warmStart)
+gpO, XO, yO, objMin, obsMin, postMaxObsY  = BO(f, modelSettings, optimizationSettings, warmStart)
 
     
 
@@ -66,7 +66,15 @@ x_plot_scaled = rescale(x_plot_array, lo, hi);
 x_plot_scaled_matrix = reshape(x_plot_scaled, 1, :);
 
 # Predict from GP
-μ, σ² = predict_f(gpO, x_plot_scaled_matrix);
+μScaled, σ²Scaled = predict_f(gpO, x_plot_scaled_matrix);
+μ_y = mean(yO)
+σ_y = max(std(yO), 1e-6)
+
+
+# Transform predictions back to the original scale
+μ = vec(μScaled) .* σ_y .+ μ_y
+σ² = vec(σ²Scaled) .* (σ_y^2)
+
 
 # Plot in original coordinates
 plot(x_plot, μ; ribbon=sqrt.(σ²), label="GP prediction", lw=2, xlabel="x");
@@ -76,8 +84,8 @@ ylabel!("f(x)")
 title!("GP vs True Function")
 scatter!(XO, yO, label="Samples", color=:black)
 
-vline!([obsMin], label="Observed Minimum", color=:red, linestyle=:dash)
-vline!([objMin], label="Objective Minimum", color=:blue, linestyle=:dash)
-
+vline!([obsMin], label="Observed Maximizer", color=:red, linestyle=:dash)
+vline!([objMin], label="Objective Maximizer", color=:blue, linestyle=:dash)
+hline!([postMaxObsY], label=" Posterior Maximum", color=:green, linestyle=:dash)
 ###################
 
