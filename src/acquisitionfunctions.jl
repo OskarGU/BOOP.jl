@@ -100,7 +100,7 @@ end
 
 
 """
-    knowledge_gradient(gp, xnew, lower, upper; n_samples=20)
+    knowledgeGradientMonteCarlo(gp, xnew, lower, upper; n_samples=20)
 
 Calculates the Knowledge Gradient (KG) acquisition function for a candidate point `xnew`.
 This version is designed for MAXIMIZATION problems.
@@ -118,13 +118,16 @@ value after sampling at `xnew`. This implementation uses Monte Carlo simulation.
 - `Float64`: The positive Knowledge Gradient value. This function returns the natural KG
   score, which should be maximized by the optimization loop.
 """
-function knowledge_gradient(gp::GPE, xnew, lower, upper; n_samples::Int=20)
+function knowledgeGradientMonteCarlo(gp::GPE, xnew; n_samples::Int=20)
     xvec = xnew isa Number ? [xnew] : xnew
     xnew = reshape(xvec, :, 1)
 
     # 1. Find the MAXIMUM of the *current* posterior mean. This is our baseline.
     μ_current(x) = predict_f(gp, reshape(x, :, 1))[1][1]
-    max_μ_current = multi_start_maximize(μ_current, lower, upper; n_starts=40)
+    d = gp.dim
+    lower= fill(-1.0, d)
+    upper= fill(1.0, d)
+    max_μ_current, _ = multi_start_maximize(μ_current, lower, upper; n_starts=40)
 
     # 2. Get the predictive distribution at the candidate point `xnew`. (No change needed)
     μ_new_point, σ²_new_point = predict_y(gp, xnew)
@@ -139,11 +142,11 @@ function knowledge_gradient(gp::GPE, xnew, lower, upper; n_samples::Int=20)
         # b. Create a temporary, "fantasy" GP model.
         x_updated = hcat(gp.x, xnew)
         y_updated = vcat(gp.y, y_sample)
-        gp_fantasy = GPE(x_updated, y_updated, gp.mean, gp.kernel, gp.logNoise)
+        gp_fantasy = GP(x_updated, y_updated, gp.mean, gp.kernel, gp.logNoise)
 
         # c. Find the MAXIMUM of the posterior mean of this new fantasy GP.
         μ_fantasy(x) = predict_f(gp_fantasy, reshape(x, :, 1))[1][1]
-        future_maximums[i] = multi_start_maximize(μ_fantasy, lower, upper; n_starts=10)
+        future_maximums[i], _ = multi_start_maximize(μ_fantasy, lower, upper; n_starts=10)
     end
 
     # 4. Calculate the expected value of the future maximum.
@@ -209,7 +212,7 @@ end
 Calculates E[max(μ + σZ)] where Z ~ N(0,1).
 This is the stable, core algorithm.
 """
-function knowledge_gradient_discrete(μ::Vector{Float64}, σ::Vector{Float64})
+function ExpectedMaxGaussian(μ::Vector{Float64}, σ::Vector{Float64})
     if length(μ) != length(σ)
         error("Input vectors μ and σ must have the same length.")
     end
@@ -267,7 +270,9 @@ Computes the Knowledge Gradient acquisition function for a multi-dimensional GP.
 This version correctly handles multi-dimensional inputs by expecting `domain_points`
 to be a D x d matrix.
 """
-function kg_acquisition_function_multid(gp::GPE, xnew::Vector{Float64}, domain_points::Matrix{Float64})
+function knowledgeGradientDiscrete(gp::GPE, xnew, domain_points::Matrix{Float64})
+    xvec = xnew isa Number ? [xnew] : xnew
+    xnew = reshape(xvec, :, 1)
     # --- Step A: Get GP-specific values ---
     # Get the current posterior mean over the discrete domain points.
     μ_current, _ = predict_f(gp, domain_points)
@@ -288,7 +293,7 @@ function kg_acquisition_function_multid(gp::GPE, xnew::Vector{Float64}, domain_p
     σ = vec(update_vector) .* σ_y_new
     
     # --- Step C: Call the robust, standalone algorithm ---
-    kg_value = knowledge_gradient_discrete(μ, σ)
+    kg_value = ExpectedMaxGaussian(μ, σ)
     
     return kg_value
 end

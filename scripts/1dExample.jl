@@ -89,3 +89,46 @@ vline!([objMin], label="Objective Maximizer", color=:blue, linestyle=:dash)
 hline!([postMaxObsY], label=" Posterior Maximum", color=:green, linestyle=:dash)
 ###################
 
+xn=-1.
+fM=maximum(yO)
+expected_improvement(gpO, xn, fM; ξ = 0.10)
+upper_confidence_bound(gpO, xn; κ = 2.0)
+@time knowledgeGradientMonteCarlo(gpO, xn; n_samples=4200)
+knowledgeGradientDiscrete(gpO, xn, Matrix(reshape(evalGrid,1,:)))
+
+evalGrid = -1.:0.01:1
+EIContainer = []
+UCBContainer = []
+KGContainer = []
+KGDiscreteContainer = []
+for i in evalGrid
+    push!(EIContainer, expected_improvement(gpO, i, fM; ξ = 0.10))
+end
+
+for i in evalGrid
+    push!(UCBContainer, upper_confidence_bound(gpO, i; κ = 2.0))
+end
+
+using ProgressMeter
+@showprogress for i in evalGrid
+    push!(KGContainer, knowledgeGradientMonteCarlo(gpO, i; n_samples=300))
+end
+
+evalGrid2 = -1.:0.001:1
+for i in evalGrid2
+    push!(KGDiscreteContainer, knowledgeGradientDiscrete(gpO, i, Matrix(reshape(evalGrid2,1,:))))
+end
+
+
+
+
+pEI = plot(evalGrid, EIContainer, label="Expected Improvement", xlabel="x", ylabel="EI value", title="Acquisition Functions")
+vline!([evalGrid[argmax(EIContainer)]], linestyle=:dash, color=:black, label="maximum at $(evalGrid[argmax(EIContainer)])")
+pUBC=plot(evalGrid, UCBContainer, label="Upper Confidence Bound", xlabel="x", ylabel="UCB value")
+vline!([evalGrid[argmax(UCBContainer)]], linestyle=:dash, color=:black, label="maximum at $(evalGrid[argmax(UCBContainer)])")
+pKG=plot(evalGrid, KGContainer, label="Knowledge Gradient", xlabel="x", ylabel="KG value")
+vline!([evalGrid[argmax(KGContainer)]], linestyle=:dash, color=:black, label="maximum at $(evalGrid[argmax(KGContainer)])")
+pKGD=plot(evalGrid2, KGDiscreteContainer, label="Discrete Knowledge Gradient", xlabel="x", ylabel="KG value")
+vline!([evalGrid2[argmax(KGDiscreteContainer)]], linestyle=:dash, color=:black, label="maximum at $(evalGrid[argmax(KGDiscreteContainer)])")
+
+plot(pEI, pUBC, pKG, pKGD, layout=(4,1), size=(800,900))

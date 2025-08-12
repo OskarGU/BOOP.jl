@@ -43,7 +43,7 @@ modelSettings = (
 )
 
 optimizationSettings = (
-    nIter=50,
+    nIter=15,
     tuningPar=0.05,
     n_restarts=20,
     bounds=(-1.0, 1.0),
@@ -57,7 +57,7 @@ gpO, XO, yO = BO(f, modelSettings, optimizationSettings, warmStart)
 # Optional: Plot marginal predictions (fix x₃ = 0)
 xx = range(lo, hi, length=50)
 yy = range(lo, hi, length=50)
-fixed_z = -2.0
+fixed_z = -0.0
 grid = [[x, y, fixed_z] for y in yy, x in xx]
 grid_scaled = rescale.(grid, lo, hi)
 grid_scaled_mat = reduce(hcat, grid_scaled)

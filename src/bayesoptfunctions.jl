@@ -10,7 +10,7 @@ function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuning
             val = acq(gp, x, f_max; ξ=tuningPar)
         elseif acq == upper_confidence_bound
             val = acq(gp, x; κ=tuningPar)
-        elseif acq == knowledge_gradient
+        elseif acq == knowledgeGradientMonteCarlo
             # Check if bounds were provided, as KG needs them
             if bounds === nothing
                 error("Knowledge Gradient requires 'bounds' to be provided.")
