@@ -9,7 +9,8 @@ include("FirstFunc.jl")
 export first_func
 
 include("acquisitionfunctions.jl")
-export expected_improvement, upper_confidence_bound, knowledge_gradient, knowledgeGradientMonteCarlo, knowledgeGradientDiscrete
+export expected_improvement, upper_confidence_bound, knowledge_gradient, knowledgeGradientMonteCarlo, 
+knowledgeGradientDiscrete, knowledgeGradientHybrid, multi_start_maximize, posterior_max, ExpectedMaxGaussian
 
 include("bayesoptfunctions.jl")
 export BO, rescale, inv_rescale, propose_next
