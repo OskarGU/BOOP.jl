@@ -118,7 +118,7 @@ value after sampling at `xnew`. This implementation uses Monte Carlo simulation.
 - `Float64`: The positive Knowledge Gradient value. This function returns the natural KG
   score, which should be maximized by the optimization loop.
 """
-function knowledgeGradientMonteCarlo(gp::GPE, xnew; n_samples::Int=20)
+function knowledgeGradientMonteCarlo(gp::GPE, xnew; n_samples::Int=200)
     xvec = xnew isa Number ? [xnew] : xnew
     xnew = reshape(xvec, :, 1)
 
@@ -210,7 +210,8 @@ end
 ##########################
 """
 Calculates E[max(μ + σZ)] where Z ~ N(0,1).
-This is the stable, core algorithm.
+This is a robust, "pure" version that ONLY returns the expected maximum.
+It handles cases where slopes (σ) are equal or nearly equal.
 """
 function ExpectedMaxGaussian(μ::Vector{Float64}, σ::Vector{Float64})
     if length(μ) != length(σ)
@@ -220,80 +221,168 @@ function ExpectedMaxGaussian(μ::Vector{Float64}, σ::Vector{Float64})
     if d == 0
         return 0.0
     elseif d == 1
-        return 0.0 # KG is E[max] - max, for one line this is E[μ+σZ] - μ = 0
+        return μ[1] # E[μ+σZ] = μ
     end
     
+    # Sort by slope in ascending order
     O = sortperm(σ)
     μ_sorted, σ_sorted = μ[O], σ[O]
     
-    I = [1, 2]
-    Z_tilde = [-Inf, (μ_sorted[1] - μ_sorted[2]) / (σ_sorted[2] - σ_sorted[1])]
+    I = [1]
+    Z_tilde = [-Inf]
 
-    for i in 3:d
-        while true
+    for i in 2:d
+        while !isempty(I)
             j = last(I)
-            z = (μ_sorted[j] - μ_sorted[i]) / (σ_sorted[i] - σ_sorted[j])
-            if z >= last(Z_tilde)
-                push!(I, i)
-                push!(Z_tilde, z)
-                break
-            else
-                pop!(I)
-                pop!(Z_tilde)
-                if isempty(I)
-                    push!(I, i); push!(Z_tilde, -Inf); break
+            # Robustness fix for near-equal slopes
+            if abs(σ_sorted[i] - σ_sorted[j]) < 1e-9
+                if μ_sorted[i] <= μ_sorted[j]
+                    @goto next_i
+                else
+                    pop!(I); pop!(Z_tilde); continue
                 end
             end
+            z = (μ_sorted[j] - μ_sorted[i]) / (σ_sorted[i] - σ_sorted[j])
+            if z > last(Z_tilde)
+                push!(I, i); push!(Z_tilde, z); break
+            else
+                pop!(I); pop!(Z_tilde)
+            end
         end
+        if isempty(I)
+            push!(I, i); push!(Z_tilde, -Inf)
+        end
+        @label next_i
     end
     
     push!(Z_tilde, Inf)
     norm_dist = Normal(0, 1)
-    
     z_upper, z_lower = Z_tilde[2:end], Z_tilde[1:end-1]
     
     A_vec = pdf.(norm_dist, z_lower) - pdf.(norm_dist, z_upper)
-    
     B_vec = cdf.(norm_dist, z_upper) - cdf.(norm_dist, z_lower)
     
     μ_I, σ_I = μ_sorted[I], σ_sorted[I]
     
     expected_max = (B_vec' * μ_I) + (A_vec' * σ_I)
-    max_μ_current = maximum(μ)
     
-    return expected_max - max_μ_current
+    return expected_max
 end
 
-"""
-Computes the Knowledge Gradient acquisition function for a multi-dimensional GP.
 
-This version correctly handles multi-dimensional inputs by expecting `domain_points`
-to be a D x d matrix.
+# --- MAIN DISCRETE KG WRAPPER FUNCTION ---
+"""
+Computes the Knowledge Gradient acquisition function for a multi-dimensional GP
+using a fixed discrete set of points.
 """
 function knowledgeGradientDiscrete(gp::GPE, xnew, domain_points::Matrix{Float64})
     xvec = xnew isa Number ? [xnew] : xnew
-    xnew = reshape(xvec, :, 1)
-    # --- Step A: Get GP-specific values ---
-    # Get the current posterior mean over the discrete domain points.
+    xnew_mat = reshape(xvec, :, 1)
+
+    # Get current posterior mean over the discrete domain points.
     μ_current, _ = predict_f(gp, domain_points)
     
     # Get the predictive distribution of a noisy observation y at xnew.
-    xnew_mat = reshape(xnew, :, 1)
     _, σ²_y_new = predict_y(gp, xnew_mat)
-    σ_y_new = sqrt(max(σ²_y_new[1], 1e-12))
+    σ_y_new = sqrt(σ²_y_new[1] + 0.1^6)
 
     # Calculate the covariance vector between the domain points and xnew.
     K_domain_xnew = cov(gp.kernel, domain_points, xnew_mat)
 
     # This vector describes the change in the posterior mean.
-    update_vector = K_domain_xnew ./ σ²_y_new[1]
+    #update_vector = K_domain_xnew ./ σ²_y_new[1]
 
-    # --- Step B: Construct μ and σ for the core algorithm ---
+    # Construct μ and σ for the core algorithm
     μ = vec(μ_current)
-    σ = vec(update_vector) .* σ_y_new
+   # σ = vec(update_vector) .* σ_y_new
+    σ = vec(K_domain_xnew ./ σ_y_new)
     
-    # --- Step C: Call the robust, standalone algorithm ---
-    kg_value = ExpectedMaxGaussian(μ, σ)
+    # 1. Call the pure function to get ONLY the expected future maximum.
+    expected_max_future = ExpectedMaxGaussian(μ, σ)
+    
+    # 2. Calculate the current maximum (the baseline) from the μ vector.
+    max_μ_current = maximum(μ)
+    
+    # 3. Perform the final subtraction to get the true KG value.
+    kg_value = expected_max_future - max_μ_current
     
     return kg_value
+end
+
+# Helper method for convenience to handle scalar xnew
+function knowledgeGradientDiscrete(gp::GPE, xnew::Number, domain_points::Matrix{Float64})
+    return knowledgeGradientDiscrete(gp, [xnew], domain_points)
+end
+
+
+###################################################
+"""
+    knowledgeGradientHybrid(gp, xnew, lower, upper; n_z=5)
+
+Calculates the Hybrid Knowledge Gradient (KGh) acquisition function for a candidate point `xnew`.
+This version is designed for MAXIMIZATION problems.
+
+The Hybrid KG combines the strengths of the Monte-Carlo and Discrete KG methods. It uses
+a small, deterministic set of `n_z` fantasy scenarios to identify a high-potential
+set of future maximizers (`X_MC`), and then uses the fast, analytical Discrete KG
+algorithm on that small set.
+
+# Arguments
+- `gp::GPE`: The trained Gaussian Process model.
+- `xnew`: The candidate point at which to evaluate the KG.
+- `lower`, `upper`: The bounds of the search domain for finding the fantasy maximizers.
+- `n_z::Int`: The number of deterministic Z-samples to use (default is 5, as in the paper).
+
+# Returns
+- `Float64`: The positive Hybrid Knowledge Gradient value.
+"""
+function knowledgeGradientHybrid(gp::GPE, xnew; n_z::Int=5)
+    d = gp.dim
+    xvec = xnew isa Number ? [xnew] : xnew
+    xnew_scaled = reshape(xvec, :, 1)
+
+    # --- Stage 1: Find the set of fantasy maximizers, X_MC ---
+    
+    probabilities = range(0.5/n_z, 1 - 0.5/n_z, length=n_z)
+    Z_h = quantile.(Normal(), probabilities)
+
+    lower_bounds_scaled = -1.0 * ones(d)
+    upper_bounds_scaled = 1.0 * ones(d)
+
+    X_MC_cols = []
+    for z_val in Z_h
+        # Create the fantasy posterior mean function for this specific Z
+        function μ_fantasy(x_scaled)
+            x_scaled_mat = reshape(x_scaled, d, 1)
+            
+            # This is the reparameterization trick: μ_future = μ_current + σ * Z
+            μ_current, _ = predict_f(gp, x_scaled_mat)
+            _, σ²_y_new = predict_y(gp, xnew_scaled)
+            σ_y_new = sqrt(max(σ²_y_new[1], 1e-12))
+            
+            K_domain_xnew = cov(gp.kernel, x_scaled_mat, xnew_scaled)
+            update_vector = K_domain_xnew ./ σ²_y_new[1]
+            σ = vec(update_vector) .* σ_y_new
+            
+            fantasy_mean = vec(μ_current) .+ σ .* z_val
+            return fantasy_mean[1]
+        end
+
+        # Find the maximizer of this fantasy posterior
+        _, x_star_j = multi_start_maximize(μ_fantasy, lower_bounds_scaled, upper_bounds_scaled; n_starts=10)
+        push!(X_MC_cols, x_star_j)
+    end
+
+    # Create the X_MC matrix from the collected maximizers
+    X_MC = hcat(unique(X_MC_cols)...)
+
+    # --- Stage 2: Calculate the final KG value analytically (Corrected) ---
+    
+    # The Hybrid KG is defined as the Discrete KG evaluated using the smart set X_MC.
+    # Your knowledgeGradientDiscrete function already correctly calculates:
+    # E[max(μ_future(X_MC))] - max(μ_current(X_MC))
+    # This is the correct and final fix.
+    kgh_value = knowledgeGradientDiscrete(gp, xnew_scaled, X_MC)
+    
+    return kgh_value
 end
