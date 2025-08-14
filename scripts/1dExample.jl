@@ -115,16 +115,16 @@ end
 
 using ProgressMeter
 @showprogress for i in evalGrid
-    push!(KGContainer, knowledgeGradientMonteCarlo(gpO, i; n_samples=50))
+    push!(KGContainer, knowledgeGradientMonteCarlo(gpO, i; n_samples=500))
 end
 
-evalGrid2 = -1.:0.01:1
+evalGrid2 = -1.1:0.1:1
 @showprogress for i in evalGrid2
-    push!(KGDiscreteContainer, knowledgeGradientDiscrete2(gpO, i, Matrix(reshape(evalGrid2,1,:))))
+    push!(KGDiscreteContainer, knowledgeGradientDiscrete(gpO, i, Matrix(reshape(evalGrid2,1,:))))
 end
 
 @showprogress for i in evalGrid
-    push!(KGHybridContainer, knowledgeGradientHybrid(gpO, i, n_z=15))    
+    push!(KGHybridContainer, knowledgeGradientHybrid(gpO, i, n_z=50))    
 end
 
 
@@ -336,10 +336,7 @@ function knowledgeGradientDiscrete2(gp::GPE, xnew, domain_points::Matrix{Float64
     # Hämta prediktiv distribution för en brusig observation
     _, σ²_y_new = predict_y(gp, xnew_mat)
     
-    # Om variansen är försvinnande liten är KG-värdet noll
-    if σ²_y_new[1] < 1e-10
-        return 0.0
-    end
+
     std_dev_y_new = sqrt(σ²_y_new[1])
 
     # --- DEN KORREKTA BERÄKNINGEN AV ~σ ---
@@ -359,3 +356,5 @@ function knowledgeGradientDiscrete2(gp::GPE, xnew, domain_points::Matrix{Float64
     
     return kg_value
 end
+
+predict_y(gpO, xnew_mat)

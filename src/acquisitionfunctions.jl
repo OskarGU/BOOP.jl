@@ -180,7 +180,12 @@ function multi_start_minimize(f, lower, upper; n_starts=20)
      best_argmin = similar(lower)
 
      for x0 in starts
-         res = optimize(f, lower, upper, x0, Fminbox(BFGS()))
+         #res = optimize(f, lower, upper, x0, Fminbox(BFGS()))
+         #res = optimize(f, lower, upper, x0, Fminbox(NelderMead()))
+         res = optimize(f, lower, upper, x0, Fminbox(LBFGS()),
+                       Optim.Options(iterations=100); # Add options if needed
+                       autodiff = :forward)
+
          if Optim.minimum(res) < best_min
             best_min = Optim.minimum(res)
             best_argmin = Optim.minimizer(res)
@@ -270,7 +275,35 @@ function ExpectedMaxGaussian(μ::Vector{Float64}, σ::Vector{Float64})
 end
 
 
-# --- MAIN DISCRETE KG WRAPPER FUNCTION ---
+"""
+Computes the posterior covariance between points in the GP. 
+"""
+
+function posterior_cov(gp::GPE, X1::AbstractMatrix, X2::AbstractMatrix)
+    # Formeln är: k_n(X1, X2) = k(X1, X2) - k(X1, X) * K_inv * k(X, X2)
+    # där K = k(X,X) + σ_n²*I
+    
+    # Beräkna de priora kovarianstermerna
+    prior_cov_12 = cov(gp.kernel, X1, X2)
+    prior_cov_1X = cov(gp.kernel, X1, gp.x)
+    prior_cov_X2 = cov(gp.kernel, gp.x, X2)
+    
+    # Lös systemet K * M = k(X, X2) för att effektivt få K_inv * k(X, X2)
+    # GaussianProcesses.jl lagrar den Cholesky-faktoriserade matrisen i gp.cK
+    # vilket gör detta mycket effektivt.
+    # L*L' * M = prior_cov_X2  =>  L' * M = L \ prior_cov_X2  =>  M = L' \ (L \ prior_cov_X2)
+    K_inv_k_X2 = gp.cK \ prior_cov_X2
+  
+    
+    # Beräkna korrektionstermen
+    correction = prior_cov_1X * K_inv_k_X2
+    
+    return prior_cov_12 - correction
+end
+
+
+
+
 """
 Computes the Knowledge Gradient acquisition function for a multi-dimensional GP
 using a fixed discrete set of points.
@@ -284,21 +317,18 @@ function knowledgeGradientDiscrete(gp::GPE, xnew, domain_points::Matrix{Float64}
     
     # Get the predictive distribution of a noisy observation y at xnew.
     _, σ²_y_new = predict_y(gp, xnew_mat)
-    σ_y_new = sqrt(σ²_y_new[1] + 0.1^6)
+    σ_y_new = sqrt(max(σ²_y_new[1], -1e-8))
 
-    # Calculate the covariance vector between the domain points and xnew.
-    K_domain_xnew = cov(gp.kernel, domain_points, xnew_mat)
-
-    # This vector describes the change in the posterior mean.
-    #update_vector = K_domain_xnew ./ σ²_y_new[1]
+    # Calculate the posterior covariance vector between the domain points and xnew.
+     post_cov_vec = posterior_cov(gp, domain_points, xnew_mat)
+     σ̃  = post_cov_vec ./ σ_y_new
 
     # Construct μ and σ for the core algorithm
     μ = vec(μ_current)
-   # σ = vec(update_vector) .* σ_y_new
-    σ = vec(K_domain_xnew ./ σ_y_new)
+   
     
     # 1. Call the pure function to get ONLY the expected future maximum.
-    expected_max_future = ExpectedMaxGaussian(μ, σ)
+    expected_max_future = ExpectedMaxGaussian(μ, vec(σ̃ ))
     
     # 2. Calculate the current maximum (the baseline) from the μ vector.
     max_μ_current = maximum(μ)
@@ -346,8 +376,8 @@ function knowledgeGradientHybrid(gp::GPE, xnew; n_z::Int=5)
     probabilities = range(0.5/n_z, 1 - 0.5/n_z, length=n_z)
     Z_h = quantile.(Normal(), probabilities)
 
-    lower_bounds_scaled = -1.0 * ones(d)
-    upper_bounds_scaled = 1.0 * ones(d)
+    lower= -1.0 * ones(d)
+    upper = 1.0 * ones(d)
 
     X_MC_cols = []
     for z_val in Z_h
@@ -358,18 +388,18 @@ function knowledgeGradientHybrid(gp::GPE, xnew; n_z::Int=5)
             # This is the reparameterization trick: μ_future = μ_current + σ * Z
             μ_current, _ = predict_f(gp, x_scaled_mat)
             _, σ²_y_new = predict_y(gp, xnew_scaled)
-            σ_y_new = sqrt(max(σ²_y_new[1], 1e-12))
+            σ_y_new = sqrt(max(σ²_y_new[1], 1e-8))
             
-            K_domain_xnew = cov(gp.kernel, x_scaled_mat, xnew_scaled)
-            update_vector = K_domain_xnew ./ σ²_y_new[1]
-            σ = vec(update_vector) .* σ_y_new
+            # This is the covariance between the current point and the domain points
+            post_cov_vec = posterior_cov(gp, x_scaled_mat, xnew_scaled)
+            σ̃  = post_cov_vec ./ σ_y_new
             
-            fantasy_mean = vec(μ_current) .+ σ .* z_val
+            fantasy_mean = vec(μ_current) .+ σ̃  .* z_val
             return fantasy_mean[1]
         end
 
         # Find the maximizer of this fantasy posterior
-        _, x_star_j = multi_start_maximize(μ_fantasy, lower_bounds_scaled, upper_bounds_scaled; n_starts=10)
+        _, x_star_j = multi_start_maximize(μ_fantasy, lower, upper; n_starts=30)
         push!(X_MC_cols, x_star_j)
     end
 
