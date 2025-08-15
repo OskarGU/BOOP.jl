@@ -118,7 +118,7 @@ value after sampling at `xnew`. This implementation uses Monte Carlo simulation.
 - `Float64`: The positive Knowledge Gradient value. This function returns the natural KG
   score, which should be maximized by the optimization loop.
 """
-function knowledgeGradientMonteCarlo(gp::GPE, xnew; n_samples::Int=200)
+function knowledgeGradientMonteCarlo(gp, xnew; n_samples::Int=200)
     xvec = xnew isa Number ? [xnew] : xnew
     xnew = reshape(xvec, :, 1)
 
@@ -137,7 +137,7 @@ function knowledgeGradientMonteCarlo(gp::GPE, xnew; n_samples::Int=200)
     future_maximums = zeros(n_samples)
     for i in 1:n_samples
         # a. Draw one potential future observation `y_sample` at `xnew`.
-        y_sample = rand(predictive_dist)
+        y_sample = [rand(predictive_dist)]
 
         # b. Create a temporary, "fantasy" GP model.
         x_updated = hcat(gp.x, xnew)

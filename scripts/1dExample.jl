@@ -43,17 +43,17 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
 
 )
 
-optimizationSettings = (nIter=1, tuningPar=0.02,  n_restarts=20, acq=expected_improvement)
-optimizationSettings = (nIter=1, tuningPar=1.,  n_restarts=20, acq=upper_confidence_bound)
-
+optimizationSettings = (nIter=1, tuningPar=0.02,  n_restarts=20, acq=expected_improvement, nSim=nothing, nq=nothing, dmp=nothing)
+optimizationSettings = (nIter=1, tuningPar=1.0,  n_restarts=20, acq=upper_confidence_bound)
+optimizationSettings = (nIter=1, tuningPar=nothing,  n_restarts=10, acq=knowledgeGradientHybrid, nq=60)
+optimizationSettings = (nIter=1, tuningPar=nothing,  n_restarts=10, acq=knowledgeGradientDiscrete, nq=nothing, dmp=reshape(1:0.01:1, 1, :))
 
 
 warmStart = (X, y[:])
 warmStart = (XO, yO)
 
-gpO, XO, yO, objMin, obsMin, postMaxObsY  = BO(f, modelSettings, optimizationSettings, warmStart)
+@time gpO, XO, yO, objMin, obsMin, postMaxObsY  = BO(f, modelSettings, optimizationSettings, warmStart);
 
-    
 
 ##################
 # Probably make plots to one function and put it in a "plotUtils" script.
@@ -70,11 +70,9 @@ x_plot_scaled_matrix = reshape(x_plot_scaled, 1, :);
 μ_y = mean(yO)
 σ_y = max(std(yO), 1e-6)
 
-
 # Transform predictions back to the original scale
 μ = vec(μScaled) .* σ_y .+ μ_y
 σ² = vec(σ²Scaled) .* (σ_y^2)
-
 
 # Plot in original coordinates
 plot(x_plot, μ; ribbon=sqrt.(σ²), label="GP prediction", lw=2, xlabel="x");
@@ -83,7 +81,6 @@ xlabel!("x")
 ylabel!("f(x)")
 title!("GP vs True Function")
 scatter!(XO, yO, label="Samples", color=:black)
-
 vline!([obsMin], label="Observed Maximizer", color=:red, linestyle=:dash)
 vline!([objMin], label="Objective Maximizer", color=:blue, linestyle=:dash)
 hline!([postMaxObsY], label=" Posterior Maximum", color=:green, linestyle=:dash)
@@ -115,7 +112,7 @@ end
 
 using ProgressMeter
 @showprogress for i in evalGrid
-    push!(KGContainer, knowledgeGradientMonteCarlo(gpO, i; n_samples=500))
+    push!(KGContainer, knowledgeGradientMonteCarlo(gpO, i; n_samples=100))
 end
 
 evalGrid2 = -1.1:0.1:1
@@ -124,7 +121,7 @@ evalGrid2 = -1.1:0.1:1
 end
 
 @showprogress for i in evalGrid
-    push!(KGHybridContainer, knowledgeGradientHybrid(gpO, i, n_z=50))    
+    push!(KGHybridContainer, knowledgeGradientHybrid(gpO, i, n_z=10))
 end
 
 
