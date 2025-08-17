@@ -13,7 +13,7 @@ function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuning
         elseif acq == knowledgeGradientHybrid
             val = acq(gp, x; n_z = nq)
         elseif acq == knowledgeGradientDiscrete
-            val = acq(gp, x; domain_points = dmp)
+            val = acq(gp, x, dmp)
         else
             error("Unknown acquisition function: $acq")
         end
@@ -24,7 +24,7 @@ function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuning
         x0 = rand(Uniform(-1., 1.), d)
 
 
-        if acq == knowledgeGradientHybrid
+        if acq == knowledgeGradientHybrid || acq == knowledgeGradientDiscrete
             # Use a robust, derivative-free optimizer for KG functions
             res = optimize(objective_to_minimize,
                            -1, 1, x0,
@@ -96,7 +96,7 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
             f_max_scaled = posteriorMax(gp, n_starts=10)
         else
             # For EI and UCB, we can use the posterior maximum at visited x-values
-            f_max_scaled = posteriorMaxObs(gp, Xscaled)
+            f_max_scaled = posteriorMaxObs(gp, Xscaled')
         end
         #f_max_scaled = maximum(y_scaled) # This option would be for noisefree functions.
 
@@ -106,7 +106,7 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
                                      acq=optimizationSettings.acq,
                                      tuningPar=optimizationSettings.tuningPar,
                                      nq=optimizationSettings.nq,
-                                     nq=optimizationSettings.dmp)
+                                     dmp=optimizationSettings.dmp)
         
         # Rescale back to original bounds to evaluate the true function
         x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]

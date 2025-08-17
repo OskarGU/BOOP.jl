@@ -308,7 +308,7 @@ end
 Computes the Knowledge Gradient acquisition function for a multi-dimensional GP
 using a fixed discrete set of points.
 """
-function knowledgeGradientDiscrete(gp::GPE, xnew, domain_points::Matrix{Float64})
+function knowledgeGradientDiscrete(gp, xnew, domain_points)
     xvec = xnew isa Number ? [xnew] : xnew
     xnew_mat = reshape(xvec, :, 1)
 
