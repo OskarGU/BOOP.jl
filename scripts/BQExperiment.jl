@@ -1,22 +1,3 @@
-"""
-    posterior_variance(gp, xnew)
-
-Computes the posterior variance of the Gaussian Process `gp` at a new point `xnew`.
-This is the primary acquisition function for standard Bayesian Quadrature methods
-like WSABI, as it directs sampling to regions of highest uncertainty in the model.
-
-Returns the posterior variance at `xnew`.
-"""
-function posterior_variance(gp, xnew)
-    xvec = xnew isa Number ? [xnew] : xnew
-    xvec = reshape(xvec, :, 1)
-
-    # predict_f returns (mean, variance)
-    _, σ² = predict_f(gp, xvec)
-
-    # We want to maximize the variance
-    return σ²[1]
-end
 
 
 ###################
@@ -97,9 +78,16 @@ function BQ_WSABI(f, modelSettings, optimizationSettings, warmStart)
 
         # Propose the next point by maximizing the posterior variance
         # The 'f_max' argument is not used by posterior_variance, so we can pass a dummy value (e.g., 0.0)
-        x_next_scaled = propose_next(gp, 0.0;
-                                     n_restarts=optimizationSettings.n_restarts,
-                                     acq=posterior_variance, dmp=nothing) # <-- Use the new acquisition function
+        #x_next_scaled = propose_next(gp, 0.0;
+        #                             n_restarts=optimizationSettings.n_restarts,
+        #                             acq=posterior_variance, dmp=nothing) # <-- Use the new acquisition function
+
+        # Nytt anrop som skickar med stats:
+        x_next_scaled = propose_nextBQ(gp, 0.0;
+                             n_restarts=optimizationSettings.n_restarts,
+                             acq=optimizationSettings.acq,
+                             dmp=optimizationSettings.dmp,
+                             stats=(μ_yw, σ_yw)) 
 
         # Rescale back to original bounds to evaluate the true function
         x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
@@ -185,10 +173,6 @@ plot(final_gp)
 
 ###############
 # 1d ex:
-using GaussianProcesses
-using Optim
-using Distributions
-using Plots
 using QuadGK # Används för att beräkna den sanna integralen för jämförelse
 
 # --- 1. Definiera en 1D-funktion att integrera ---
@@ -212,7 +196,7 @@ modelSettings_bq_1d = (
 
 # --- 3. Inställningar för sampling ---
 optimizationSettings_bq_1d = (
-    nIter = 15, # Färre iterationer behövs för att se resultat i 1D
+    nIter = 10, # Färre iterationer behövs för att se resultat i 1D
     n_restarts = 10,
     acq = posterior_variance, # Använder osäkerhetssampling
     dmp = nothing
@@ -340,3 +324,525 @@ scatter!(X_hist, y_hist,
 
 ##################
 # New ac
+# Symbol för att identifiera den nya metoden
+function width_in_original_scale end
+
+"""
+    original_scale_uncertainty(gp, x; y_mean, y_std, c=1.96)
+
+Beräknar bredden på konfidensintervallet i den ursprungliga, icke-transformerade skalan.
+Detta är en acquisition-funktion som balanserar exploration (osäkerhet) med
+exploitation (regioner med högt förväntat funktionsvärde).
+
+# Arguments
+- `gp`: Den tränade GP-modellen (på standardiserad log-data).
+- `x`: Punkten där funktionen ska utvärderas.
+- `y_mean`, `y_std`: Medelvärde och std.avv. för den log-transformerade datan.
+- `c`: Konstant för konfidensintervallet (1.96 för 95%).
+"""
+function original_scale_uncertainty(gp, x; y_mean, y_std, c=1.96)
+    xvec = x isa Number ? [x] : x
+    xvec = reshape(xvec, :, 1)
+
+    # 1. Hämta prediktion från GP:n i den standardiserade log-skalan
+    μ_scaled, σ²_scaled = predict_f(gp, xvec)
+    μ_s, σ_s = μ_scaled[1], sqrt(max(σ²_scaled[1], 1e-8))
+
+    # 2. "Av-standardisera" gränserna för att komma till log-skalan
+    upper_bound_warped = (μ_s + c * σ_s) * y_std + y_mean
+    lower_bound_warped = (μ_s - c * σ_s) * y_std + y_mean
+
+    # 3. "Av-warpa" med exp() för att komma till originalskalan
+    upper_bound_original = exp(upper_bound_warped)
+    lower_bound_original = exp(lower_bound_warped)
+
+    # 4. Returnera bredden, vilket är vår acquisition score
+    return upper_bound_original - lower_bound_original
+end
+
+
+
+
+# Uppdatera signaturen för att kunna ta emot "stats"
+function propose_nextBQ(gp, f_max; n_restarts=20, acq=expected_improvement, tuningPar = 0.10, nq=20, dmp, stats=nothing)
+    d = gp.dim
+    best_acq_val = -Inf
+    best_x = zeros(d)
+
+    function objective_to_minimize(x)
+        val = 0.0
+        if acq == expected_improvement
+            val = acq(gp, x, f_max; ξ=tuningPar)
+        elseif acq == upper_confidence_bound
+            val = acq(gp, x; κ=tuningPar)
+        elseif acq == knowledgeGradientHybrid
+            val = acq(gp, x; n_z = nq)
+        elseif acq == knowledgeGradientDiscrete
+            val = acq(gp, x, dmp)
+        elseif acq == posterior_variance
+            val = acq(gp, x)
+        # --- NYTT BLOCK FÖR DIN AVANCERADE FUNKTION ---
+        elseif acq == width_in_original_scale
+            if stats === nothing
+                error("width_in_original_scale requires 'stats' (mean, std) to be provided.")
+            end
+            # Anropa hjälpfunktionen med den extra informationen
+            val = original_scale_uncertainty(gp, x; y_mean=stats[1], y_std=stats[2])
+        # ---------------------------------------------
+        else
+            error("Unknown acquisition function: $acq")
+        end
+        return -val
+    end
+
+    # ... resten av funktionen är exakt densamma ...
+    for _ in 1:n_restarts
+        x0 = rand(Uniform(-1., 1.), d)
+        
+        # ... (ingen ändring i optimeringsanropen) ...
+        if acq == knowledgeGradientHybrid || acq == knowledgeGradientDiscrete
+            res = optimize(objective_to_minimize, -1, 1, x0, Fminbox(NelderMead()))
+        else
+            res = optimize(objective_to_minimize, -1. * ones(d), 1. * ones(d), x0, Fminbox(LBFGS()); autodiff = :forward)
+        end
+        
+        current_acq_val = -res.minimum
+        if current_acq_val > best_acq_val
+            best_acq_val = current_acq_val
+            best_x = res.minimizer
+        end
+    end
+
+    return best_x
+end
+
+# Inställningar för den nya, avancerade acquisition-funktionen
+optimizationSettings_advanced = (
+    nIter = 10, # Kör gärna lite fler iterationer
+    n_restarts = 15,
+    acq = width_in_original_scale, # <-- Välj den nya metoden
+    dmp = nothing
+)
+
+
+
+# Börja med 3 slumpmässiga punkter i domänen
+X_start = rand(3, 1) .* 6.0
+y_start = f.(X_start)[:] # Notera den kortare syntaxen f.(X) för elementvis operation
+
+warmStart_bq_1d = (X_start, y_start)
+# Kör sedan som vanligt med de nya inställningarna
+final_gp, X_hist, y_hist, integral_val, final_stats = BQ_WSABI(f, modelSettings_bq_1d, optimizationSettings_advanced, warmStart_bq_1d)
+
+# Plotta resultaten som förut för att se skillnaden!
+# ... (din plot-kod) ...
+μ_final, σ_final = final_stats
+
+println("\n" * "="^40)
+println("Resultat:")
+println("Sann integral: \t\t $(round(integral_true, digits=5))")
+println("WSABI-estimat: \t $(round(integral_val, digits=5))")
+println("="^40)
+
+
+# --- PLOTTA RESULTATET MED JÄMFÖRELSE (KORRIGERAD) ---
+
+# 1. Skapa ett tätt grid på den URSPRUNGLIGA skalan [0, 6] för att plotta
+x_grid_original = range(modelSettings_bq_1d.xBounds[1][1], modelSettings_bq_1d.xBounds[2][1], length=400)
+
+# 2. **NYTT STEG: Skala om gridet till [-1, 1] för prediktion**
+#    (Vi måste använda reshape eftersom din rescale-funktion förväntar sig en matris)
+x_grid_scaled = rescale(reshape(collect(x_grid_original), :, 1),
+                        modelSettings_bq_1d.xBounds[1],
+                        modelSettings_bq_1d.xBounds[2])
+
+# 3. Hämta GP-prediktionen med det KORREKT SKALADE gridet
+μ_gp_scaled, σ²_gp_scaled = predict_f(final_gp, x_grid_scaled') # Notera: x_grid_scaled'
+σ_gp_scaled = sqrt.(σ²_gp_scaled)
+
+# 4. Beräkna den sanna funktionen (samma som förut)
+y_true = f.(x_grid_original)
+y_true_warped = log.(y_true .+ 1e-8)
+y_true_warped_scaled = (y_true_warped .- μ_final) ./ σ_final
+
+# 5. Skapa den korrekta jämförande plotten
+#    Notera att vi plottar mot `x_grid_original` på x-axeln
+plot(x_grid_original, μ_gp_scaled,
+     ribbon = 1.96 * σ_gp_scaled,
+     fillalpha = 0.2,
+     label = "GP-modell av log(f(x))",
+     xlabel = "x",
+     ylabel = "log(f(x)) [standardiserad]",
+     title = "Jämförelse av GP-modell och Sann Funktion (Korrekt Skala)",
+     legend = :bottomleft,
+     linewidth = 2
+)
+
+# Lägg till den sanna funktionen
+plot!(x_grid_original, y_true_warped_scaled,
+    label = "Sann log(f(x))",
+    color = :black,
+    linestyle = :dash,
+    linewidth = 2
+)
+
+# Lägg till de samplade punkterna
+y_warped_scaled = (log.(y_hist .+ 1e-8) .- μ_final) ./ σ_final
+scatter!(X_hist, y_warped_scaled,
+         label = "Samplade punkter",
+         markersize = 5,
+         markerstrokewidth = 1.5,
+         color = :red
+)
+
+################
+# Av-warpa   
+# --- PLOTTA I ORIGINALSKALAN (f(x)) ---
+
+# Vi har redan alla värden vi behöver från föregående steg:
+# μ_gp_scaled, σ_gp_scaled, μ_final, σ_final, x_grid_original
+
+# 1. "Av-standardisera" medelvärdet och konfidensgränserna
+μ_gp_warped = μ_gp_scaled .* σ_final .+ μ_final
+upper_bound_warped = (μ_gp_scaled .+ 1.96 .* σ_gp_scaled) .* σ_final .+ μ_final
+lower_bound_warped = (μ_gp_scaled .- 1.96 .* σ_gp_scaled) .* σ_final .+ μ_final
+
+# 2. "Av-warpa" med exp() för att komma till originalskalan
+μ_gp_original = exp.(μ_gp_warped)
+upper_bound_original = exp.(upper_bound_warped)
+lower_bound_original = exp.(lower_bound_warped)
+
+# 3. Skapa plotten i originalskalan
+plot(x_grid_original, μ_gp_original,
+     # Ribbon hanterar asymmetriska intervall genom att ange avstånd från medelvärdet
+     ribbon = (μ_gp_original .- lower_bound_original, upper_bound_original .- μ_gp_original),
+     fillalpha = 0.25,
+     label = "GP-modell av f(x)",
+     xlabel = "x",
+     ylabel = "f(x) [Originalskala]",
+     title = "Slutgiltig Modell i Originalskalan",
+     #legend = :topleft,
+     linewidth = 2
+)
+
+# Lägg till den sanna, ursprungliga funktionen f(x)
+plot!(x_grid_original, f.(x_grid_original),
+    label = "Sann f(x)",
+    color = :black,
+    linestyle = :dash,
+    linewidth = 2
+)
+
+# Lägg till de samplade punkterna (X_hist och y_hist är redan i originalskalan)
+scatter!(X_hist, y_hist,
+         label = "Samplade punkter",
+         markersize = 5,
+         markerstrokewidth = 1.5,
+         color = :red
+)
+
+
+
+
+
+
+
+#####################
+#####################
+# med tuning c.
+# Ladda alla nödvändiga paket
+using GaussianProcesses
+using Optim
+using Distributions
+using Plots
+using QuadGK
+
+# --- Funktioner (från tidigare) ---
+
+# Samma funktion att integrera
+f(x) = exp(-(x - 2)^2) + 0.8 * exp(-(x - 4)^2 * 2)
+integral_true, _ = quadgk(f, 0, 6)
+
+# Symbol och hjälpfunktion för vår avancerade acquisition-funktion
+function width_in_original_scale end
+function original_scale_uncertainty(gp, x; y_mean, y_std, c=1.96)
+    xvec = x isa Number ? [x] : x
+    xvec = reshape(xvec, :, 1)
+    μ_scaled, σ²_scaled = predict_f(gp, xvec)
+    μ_s, σ_s = μ_scaled[1], sqrt(max(σ²_scaled[1], 1e-8))
+    upper_bound_warped = (μ_s + c * σ_s) * y_std + y_mean
+    lower_bound_warped = (μ_s - c * σ_s) * y_std + y_mean
+    upper_bound_original = exp(upper_bound_warped)
+    lower_bound_original = exp(lower_bound_warped)
+    return upper_bound_original - lower_bound_original
+end
+
+# Andra hjälpfunktioner (rescale, etc. antas finnas definierade)
+function rescale2(X, lo, hi)
+    return 2 .* (X .- lo') ./ (hi' .- lo') .- 1
+end
+inv_rescale(X_scaled, lo, hi) = ((X_scaled .+ 1) ./ 2) .* (hi' .- lo') .+ lo'
+
+# -------------------------------------------------------------
+# --- STEG 1: Uppdatera `propose_nextBQ` ---
+# -------------------------------------------------------------
+function propose_nextBQ(gp, f_max; n_restarts=20, acq=expected_improvement, tuningPar = 0.10, nq=20, dmp, stats=nothing)
+    d = gp.dim
+    best_acq_val = -Inf
+    best_x = zeros(d)
+
+    function objective_to_minimize(x)
+        val = 0.0
+        # --- (Inga ändringar i de första blocken) ---
+        if acq == posterior_variance
+             val = posterior_variance(gp, x)
+        # --- ÄNDRING I DETTA BLOCK ---
+        elseif acq == width_in_original_scale
+            if stats === nothing || length(stats) < 3
+                error("width_in_original_scale requires 'stats' (mean, std, c) to be provided.")
+            end
+            # Anropa hjälpfunktionen med den dynamiska c-parametern från stats[3]
+            val = original_scale_uncertainty(gp, x; y_mean=stats[1], y_std=stats[2], c=stats[3]) # <-- ÄNDRING
+        # ---------------------------------------------
+        else
+            error("Unknown acquisition function: $acq")
+        end
+        return -val
+    end
+
+    for _ in 1:n_restarts
+        x0 = rand(Uniform(-1., 1.), d)
+        if acq == knowledgeGradientHybrid || acq == knowledgeGradientDiscrete
+            res = optimize(objective_to_minimize, -1, 1, x0, Fminbox(NelderMead()))
+        else
+            res = optimize(objective_to_minimize, -1. * ones(d), 1. * ones(d), x0, Fminbox(LBFGS()); autodiff = :forward)
+        end
+        current_acq_val = -res.minimum
+        if current_acq_val > best_acq_val
+            best_acq_val = current_acq_val
+            best_x = res.minimizer
+        end
+    end
+
+    return best_x
+end
+
+# -------------------------------------------------------------
+# --- STEG 2: Uppdatera `BQ_WSABI` ---
+# -------------------------------------------------------------
+function BQ_WSABI(f, modelSettings, optimizationSettings, warmStart)
+    X, y = warmStart
+    Xscaled = rescale(X, modelSettings.xBounds[1], modelSettings.xBounds[2])
+
+    for i in 1:optimizationSettings.nIter
+        y_warped = log.(y .+ 1e-8)
+        μ_yw = mean(y_warped)
+        σ_yw = max(std(y_warped), 1e-6)
+        y_warped_scaled = (y_warped .- μ_yw) ./ σ_yw
+
+        gp = GP(Xscaled', y_warped_scaled, modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
+        optimize!(gp; kernbounds=modelSettings.kernelBounds, noisebounds=modelSettings.noiseBounds, options=Optim.Options(iterations=100))
+
+        # --- NYTT BLOCK: Beräkna dynamisk c-parameter ---
+        # Hämta posterior-medelvärdet vid de redan observerade punkterna
+        μ_obs_scaled, _ = predict_f(gp, Xscaled')
+        # "Av-standardisera" för att få dem på log-skalan
+        μ_obs_warped = vec(μ_obs_scaled) .* σ_yw .+ μ_yw
+        # Beräkna rangen (max - min)
+        dr_posterior = maximum(μ_obs_warped) - minimum(μ_obs_warped)
+
+        # Beräkna dynamiskt c med den logaritmiska heuristiken
+        c_base = optimizationSettings.c_base
+        c_sensitivity = optimizationSettings.c_sensitivity
+        c_dynamisk = c_base + c_sensitivity * log10(1 + dr_posterior)
+        # ---------------------------------------------------
+
+        # Anropa propose_nextBQ och skicka med den nya dynamiska c-parametern
+        x_next_scaled = propose_nextBQ(gp, 0.0;
+                                     n_restarts=optimizationSettings.n_restarts,
+                                     acq=optimizationSettings.acq,
+                                     dmp=optimizationSettings.dmp,
+                                     stats=(μ_yw, σ_yw, c_dynamisk)) # <-- ÄNDRING
+
+        x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
+        y_next = f(x_next_original[1])
+
+        X = vcat(X, x_next_original')
+        Xscaled = vcat(Xscaled, x_next_scaled')
+        y = vcat(y, y_next)
+
+        println("Iter $i: Dynamic Range (post-mean) = $(round(dr_posterior, digits=2)), Använder c = $(round(c_dynamisk, digits=2))")
+    end
+
+    # ... (resten av funktionen för slutgiltig GP och integral är oförändrad) ...
+    y_warped_final = log.(y .+ 1e-8)
+    μ_yw_final = mean(y_warped_final)
+    σ_yw_final = max(std(y_warped_final), 1e-6)
+    y_ws_final = (y_warped_final .- μ_yw_final) ./ σ_yw_final
+
+    gp_final = GP(Xscaled', y_ws_final, modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
+    optimize!(gp_final; kernbounds=modelSettings.kernelBounds, noisebounds=modelSettings.noiseBounds, options=Optim.Options(iterations=500))
+
+    integral_estimate = estimate_integral_wsabi(gp_final, modelSettings.xBounds, n_samples=100_000, y_mean=μ_yw_final, y_std=σ_yw_final)
+    
+    return gp_final, X, y, integral_estimate, (μ_yw_final, σ_yw_final)
+end
+
+# Funktion för att estimera integralen (oförändrad)
+function estimate_integral_wsabi(gp, bounds; n_samples=100_000, y_mean=0.0, y_std=1.0)
+    lo, hi = bounds
+    d = gp.dim
+    domain_volume = prod(hi .- lo)
+    X_mc_orig = rand(d, n_samples) .* (hi .- lo) .+ lo
+    X_mc_scaled = rescale(X_mc_orig', lo, hi)'
+    μ_scaled, σ²_scaled = predict_f(gp, X_mc_scaled)
+    μ_unstandardized = μ_scaled .* y_std .+ y_mean
+    σ²_unstandardized = σ²_scaled .* (y_std^2)
+    integrand_values = exp.(μ_unstandardized .+ 0.5 .* σ²_unstandardized)
+    integral_estimate = mean(integrand_values) * domain_volume
+    return integral_estimate
+end
+
+
+# -------------------------------------------------------------
+# --- STEG 3: Kör med nya adaptiva inställningar ---
+# -------------------------------------------------------------
+
+modelSettings_bq_1d = (
+    xdim = 1,
+    xBounds = ([0.0], [6.0]),
+    mean = MeanZero(),
+    kernel = SE(0.0, 0.0),
+    logNoise = -4.0,
+    kernelBounds = [[-2.0, -2.0], [2.0, 2.0]],
+    noiseBounds = [-6., -2.]
+)
+
+# --- NYTT: Inställningar för den ADAPTIVA acquisition-funktionen ---
+optimizationSettings_adaptive = (
+    nIter = 6,
+    n_restarts = 15,
+    acq = width_in_original_scale,
+    dmp = nothing,
+    c_base = 1.96,        # <-- Grundläggande "äventyrlighet"
+    c_sensitivity = 0.5   # <-- Hur starkt c ska reagera på dynamisk range
+)
+
+# Startpunkter
+X_start = rand(3, 1) .* 6.0
+y_start = vec(f.(X_start))
+warmStart_bq_1d = (X_start, y_start)
+
+# Kör algoritmen!
+final_gp, X_hist, y_hist, integral_val, final_stats = BQ_WSABI(f, modelSettings_bq_1d, optimizationSettings_adaptive, warmStart_bq_1d)
+
+# Plotta resultaten som förut och se hur c förändras i konsolen!
+# ... (all din plot-kod kan återanvändas här) ...
+# Plotta resultaten som förut för att se skillnaden!
+# ... (din plot-kod) ...
+μ_final, σ_final = final_stats
+
+println("\n" * "="^40)
+println("Resultat:")
+println("Sann integral: \t\t $(round(integral_true, digits=5))")
+println("WSABI-estimat: \t $(round(integral_val, digits=5))")
+println("="^40)
+
+
+# --- PLOTTA RESULTATET MED JÄMFÖRELSE (KORRIGERAD) ---
+
+# 1. Skapa ett tätt grid på den URSPRUNGLIGA skalan [0, 6] för att plotta
+x_grid_original = range(modelSettings_bq_1d.xBounds[1][1], modelSettings_bq_1d.xBounds[2][1], length=400)
+
+# 2. **NYTT STEG: Skala om gridet till [-1, 1] för prediktion**
+#    (Vi måste använda reshape eftersom din rescale-funktion förväntar sig en matris)
+x_grid_scaled = rescale(reshape(collect(x_grid_original), :, 1),
+                        modelSettings_bq_1d.xBounds[1],
+                        modelSettings_bq_1d.xBounds[2])
+
+# 3. Hämta GP-prediktionen med det KORREKT SKALADE gridet
+μ_gp_scaled, σ²_gp_scaled = predict_f(final_gp, x_grid_scaled') # Notera: x_grid_scaled'
+σ_gp_scaled = sqrt.(σ²_gp_scaled)
+
+# 4. Beräkna den sanna funktionen (samma som förut)
+y_true = f.(x_grid_original)
+y_true_warped = log.(y_true .+ 1e-8)
+y_true_warped_scaled = (y_true_warped .- μ_final) ./ σ_final
+
+# 5. Skapa den korrekta jämförande plotten
+#    Notera att vi plottar mot `x_grid_original` på x-axeln
+plot(x_grid_original, μ_gp_scaled,
+     ribbon = 1.96 * σ_gp_scaled,
+     fillalpha = 0.2,
+     label = "GP-modell av log(f(x))",
+     xlabel = "x",
+     ylabel = "log(f(x)) [standardiserad]",
+     title = "Jämförelse av GP-modell och Sann Funktion (Korrekt Skala)",
+     legend = :bottomleft,
+     linewidth = 2
+)
+
+# Lägg till den sanna funktionen
+plot!(x_grid_original, y_true_warped_scaled,
+    label = "Sann log(f(x))",
+    color = :black,
+    linestyle = :dash,
+    linewidth = 2
+)
+
+# Lägg till de samplade punkterna
+y_warped_scaled = (log.(y_hist .+ 1e-8) .- μ_final) ./ σ_final
+scatter!(X_hist, y_warped_scaled,
+         label = "Samplade punkter",
+         markersize = 5,
+         markerstrokewidth = 1.5,
+         color = :red
+)
+
+################
+# Av-warpa   
+# --- PLOTTA I ORIGINALSKALAN (f(x)) ---
+
+# Vi har redan alla värden vi behöver från föregående steg:
+# μ_gp_scaled, σ_gp_scaled, μ_final, σ_final, x_grid_original
+
+# 1. "Av-standardisera" medelvärdet och konfidensgränserna
+μ_gp_warped = μ_gp_scaled .* σ_final .+ μ_final
+upper_bound_warped = (μ_gp_scaled .+ 1.96 .* σ_gp_scaled) .* σ_final .+ μ_final
+lower_bound_warped = (μ_gp_scaled .- 1.96 .* σ_gp_scaled) .* σ_final .+ μ_final
+
+# 2. "Av-warpa" med exp() för att komma till originalskalan
+μ_gp_original = exp.(μ_gp_warped)
+upper_bound_original = exp.(upper_bound_warped)
+lower_bound_original = exp.(lower_bound_warped)
+
+# 3. Skapa plotten i originalskalan
+plot(x_grid_original, μ_gp_original,
+     # Ribbon hanterar asymmetriska intervall genom att ange avstånd från medelvärdet
+     ribbon = (μ_gp_original .- lower_bound_original, upper_bound_original .- μ_gp_original),
+     fillalpha = 0.25,
+     label = "GP-modell av f(x)",
+     xlabel = "x",
+     ylabel = "f(x) [Originalskala]",
+     title = "Slutgiltig Modell i Originalskalan",
+     #legend = :topleft,
+     linewidth = 2
+)
+
+# Lägg till den sanna, ursprungliga funktionen f(x)
+plot!(x_grid_original, f.(x_grid_original),
+    label = "Sann f(x)",
+    color = :black,
+    linestyle = :dash,
+    linewidth = 2
+)
+
+# Lägg till de samplade punkterna (X_hist och y_hist är redan i originalskalan)
+scatter!(X_hist, y_hist,
+         label = "Samplade punkter",
+         markersize = 5,
+         markerstrokewidth = 1.5,
+         color = :red
+)
+
+

@@ -12,7 +12,7 @@ function gaussian_mixture_pdf(x::Vector{Float64})
     p1 = MvNormal(μ1, Σ1)
     p2 = MvNormal(μ2, Σ2)
     w1, w2 = 0.5, 0.5
-    return 10*(w1 * pdf(p1, x) + w2 * pdf(p2, x))
+    return 20*(w1 * pdf(p1, x) + w2 * pdf(p2, x))
 end
 
 f(x) = gaussian_mixture_pdf(x) + 0.05randn()
@@ -42,10 +42,12 @@ y = [f(vec(X[i, :])) for i in 1:size(X, 1)]
 
 d=2
 mean1 = MeanConst(0.0)
-kernel1 = Mat52Ard(log(1.)*ones(d), 1.0)  # lengthscale zeros means will be optimized
+#kernel1 = Mat52Ard(log(1.)*ones(d), 1.0)  # lengthscale zeros means will be optimized
+kernel1 = SEArd(log(1.)*ones(d), 1.0)  # lengthscale zeros means will be optimized
+
 logNoise1 = log(1e-1)              # low noise since pdf is deterministic
 KB = [[-3, -3., -5], [log(1.5), log(1.5), 2]];
-NB = [-6., 1.];
+NB = [-6., 0.1];
 
 
 modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1, 
@@ -56,9 +58,23 @@ modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1,
 
 # The results are quite sensitive to the tuning parameter in the 2d case. 
 # Especially ucb is sensitive.
-optimizationSettings = (nIter=3, tuningPar=0.1,  n_restarts=30, acq=expected_improvement)
+optimizationSettings = (nIter=3, tuningPar=0.3,  n_restarts=30, acq=expected_improvement, nq=nothing, dmp=nothing)
 
-#optimizationSettings = (nIter=20, tuningPar=3.5,  n_restarts=20,acq=upper_confidence_bound)
+# 1. Definiera koordinaterna för varje axel
+x_coords = -1.0:0.05:1.0
+y_coords = -1.0:0.05:1.0
+
+# 2. Skapa en iterator som ger alla (x, y) par
+grid_iterator = Iterators.product(x_coords, y_coords)
+
+# 3. Omvandla iteratorn till en 2xN-matris
+#    - [x, y] skapar en 2-elements vektor för varje par.
+#    - ... "splattar" ut alla dessa vektorer som argument till hcat.
+#    - hcat(...) sammanfogar dem horisontellt till en stor matris.
+grid_2d = hcat([[x, y] for (x, y) in grid_iterator]...)
+optimizationSettings = (nIter=1, tuningPar=nothing,  n_restarts=10, acq=knowledgeGradientDiscrete, nSim=nothing, nq=nothing, dmp=grid_2d)
+
+optimizationSettings = (nIter=3, tuningPar=3.5,  n_restarts=20,acq=upper_confidence_bound, nq=nothing, dmp=nothing)
 
 warmStart = (X, y)
 warmStart = (XO, yO)
