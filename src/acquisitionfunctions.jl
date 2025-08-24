@@ -416,3 +416,84 @@ function knowledgeGradientHybrid(gp::GPE, xnew; n_z::Int=5)
     
     return kgh_value
 end
+
+
+
+
+
+###########################
+# Experimenting:
+"""
+    posterior_variance(gp, xnew)
+
+Computes the posterior variance of the Gaussian Process `gp` at a new point `xnew`.
+This is the primary acquisition function for standard Bayesian Quadrature methods
+like WSABI, as it directs sampling to regions of highest uncertainty in the model.
+
+Returns the posterior variance at `xnew`.
+"""
+function posterior_variance(gp, xnew)
+    xvec = xnew isa Number ? [xnew] : xnew
+    xvec = reshape(xvec, :, 1)
+
+    # predict_f returns (mean, variance)
+    _, σ² = predict_f(gp, xvec)
+
+    # We want to maximize the variance
+    return σ²[1]
+end
+
+
+###################
+
+"""
+    estimate_integral_wsabi(gp, bounds; n_samples=100_000, y_mean=0.0, y_std=1.0)
+
+Estimates the integral of the original function f(x) using the final GP model
+trained on warped data g(x) = log(f(x)).
+
+It uses Monte Carlo integration on the posterior expectation of f(x).
+E[f(x)] = exp(μ_g(x) + σ²_g(x)/2), where μ_g and σ²_g are the posterior mean
+and variance of the GP fitted to the log-transformed data.
+
+# Arguments
+- `gp`: The final trained GP model.
+- `bounds`: A tuple (lo, hi) defining the integration domain.
+- `n_samples`: Number of Monte Carlo samples for the approximation.
+- `y_mean`, `y_std`: The mean and std dev used to standardize the warped y-values,
+                     needed to un-scale the GP's predictions.
+
+# Returns
+- `Float64`: The estimated value of the integral.
+"""
+function estimate_integral_wsabi(gp, bounds; n_samples=100_000, y_mean=0.0, y_std=1.0)
+    lo, hi = bounds
+    d = gp.dim
+
+    # Calculate the volume of the integration domain
+    domain_volume = prod(hi .- lo)
+
+    # Generate a large number of random points within the original domain
+    X_mc_orig = rand(d, n_samples) .* (hi .- lo) .+ lo
+
+    # Rescale points to [-1, 1] for the GP
+    X_mc_scaled = rescale(X_mc_orig', lo, hi)'
+
+    # Get posterior mean and variance from the GP on the scaled points
+    μ_scaled, σ²_scaled = predict_f(gp, X_mc_scaled)
+
+    # --- Un-standardize the GP's predictions ---
+    # The GP was trained on z = (y_warped - μ_y) / σ_y
+    # So, y_warped = z * σ_y + μ_y
+    μ_unstandardized = μ_scaled .* y_std .+ y_mean
+    σ²_unstandardized = σ²_scaled .* (y_std^2)
+
+    # Calculate the expected value of the original (un-warped) function f(x)
+    # E[f(x)] = exp(μ_g + σ²_g/2)
+    integrand_values = exp.(μ_unstandardized .+ 0.5 .* σ²_unstandardized)
+
+    # The Monte Carlo estimate of the integral is the mean of these values times the domain volume
+    integral_estimate = mean(integrand_values) * domain_volume
+
+    return integral_estimate
+end

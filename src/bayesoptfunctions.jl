@@ -14,6 +14,8 @@ function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuning
             val = acq(gp, x; n_z = nq)
         elseif acq == knowledgeGradientDiscrete
             val = acq(gp, x, dmp)
+        elseif acq == posterior_variance            
+            val = acq(gp, x)
         else
             error("Unknown acquisition function: $acq")
         end
