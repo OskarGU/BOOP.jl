@@ -2,7 +2,7 @@
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "2c927b37bb1a2b4a95edeb24789b98965793032b"
+project_hash = "bb6e8cc77e33ca7e7a8307d9cdb276fa5f34b051"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "be7ae030256b8ef14a441726c4c37766b90b93a3"
@@ -1080,6 +1080,12 @@ version = "0.4.3+0"
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 version = "0.7.0"
+
+[[deps.SMCsamplers]]
+deps = ["Distributions", "LaTeXStrings", "LinearAlgebra", "Measures", "PDMats", "Plots", "Random", "Statistics"]
+path = "C:\\Users\\oskarg\\Box Sync\\PostDoc\\My DevFolder\\SMCsamplers"
+uuid = "2328efba-24c2-4a10-a32f-a74f69d05fca"
+version = "1.0.0-DEV"
 
 [[deps.ScikitLearnBase]]
 deps = ["LinearAlgebra", "Random", "Statistics"]

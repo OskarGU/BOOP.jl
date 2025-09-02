@@ -1,51 +1,86 @@
-# Propose next point using multiple random restarts
-function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuningPar = 0.10, nq=20, dmp)
+
+# Helper function that returns the objective function to be minimized. Gives nice dispatch in next function instead of ugly if.
+_get_objective(gp, f_max, config::EIConfig) = x -> -expected_improvement(gp, x, f_max; ξ=config.ξ)
+_get_objective(gp, f_max, config::UCBConfig) = x -> -upper_confidence_bound(gp, x; κ=config.κ)
+_get_objective(gp, f_max, config::KGHConfig) = x -> -knowledgeGradientHybrid(gp, x; n_z=config.n_z)
+_get_objective(gp, f_max, config::KGDConfig) = x -> -knowledgeGradientDiscrete(gp, x, config.domain_points)
+_get_objective(gp, f_max, config::PosteriorVarianceConfig) = x -> -posterior_variance(gp, x)
+
+# Refactored main function
+function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
     d = gp.dim
-    best_acq_val = -Inf # Start at -Inf because we're looking for a maximum
+    best_acq_val = -Inf
     best_x = zeros(d)
 
-    function objective_to_minimize(x)
-        val = 0.0
-        if acq == expected_improvement
-            val = acq(gp, x, f_max; ξ=tuningPar)
-        elseif acq == upper_confidence_bound
-            val = acq(gp, x; κ=tuningPar)
-        elseif acq == knowledgeGradientHybrid
-            val = acq(gp, x; n_z = nq)
-        elseif acq == knowledgeGradientDiscrete
-            val = acq(gp, x, dmp)
-        elseif acq == posterior_variance            
-            val = acq(gp, x)
-        else
-            error("Unknown acquisition function: $acq")
-        end
-        return -val
-    end
+    # Dispatch to the correct helper to get the objective function
+    objective_to_minimize = _get_objective(gp, f_max, acq_config)
 
     for _ in 1:n_restarts
         x0 = rand(Uniform(-1., 1.), d)
 
-
-        if acq == knowledgeGradientHybrid || acq == knowledgeGradientDiscrete
-            # Use a robust, derivative-free optimizer for KG functions
-            res = optimize(objective_to_minimize,
-                           -1, 1, x0,
-                           Fminbox(NelderMead()))
+        # Use the type to select the optimizer
+        res = if acq_config isa KnowledgeGradientConfig # Use the abstract type
+            optimize(objective_to_minimize, -1.0, 1.0, x0, Fminbox(NelderMead()))
         else
-            res = optimize(objective_to_minimize,
-                       -1. * ones(d), 1. * ones(d), x0,
-                       Fminbox(LBFGS()); autodiff = :forward)
+            optimize(objective_to_minimize, -1.0 * ones(d), 1.0 * ones(d), x0, Fminbox(LBFGS()); autodiff = :forward)
         end
-        # The acquisition score is the negative of the optimizer's minimum
-        current_acq_val = -res.minimum
+
+        current_acq_val = -Optim.minimum(res)
         if current_acq_val > best_acq_val
             best_acq_val = current_acq_val
-            best_x = res.minimizer
+            best_x = Optim.minimizer(res)
         end
     end
-
     return best_x
 end
+# Propose next point using multiple random restarts
+#function propose_next(gp, f_max; n_restarts=20, acq=expected_improvement, tuningPar = 0.10, nq=20, dmp)
+#    d = gp.dim
+#    best_acq_val = -Inf # Start at -Inf because we're looking for a maximum
+#    best_x = zeros(d)
+#
+#    function objective_to_minimize(x)
+#        val = 0.0
+#        if acq == expected_improvement
+#            val = acq(gp, x, f_max; ξ=tuningPar)
+#        elseif acq == upper_confidence_bound
+#            val = acq(gp, x; κ=tuningPar)
+#        elseif acq == knowledgeGradientHybrid
+#            val = acq(gp, x; n_z = nq)
+#        elseif acq == knowledgeGradientDiscrete
+#            val = acq(gp, x, dmp)
+#        elseif acq == posterior_variance            
+#            val = acq(gp, x)
+#        else
+#            error("Unknown acquisition function: $acq")
+#        end
+#        return -val
+#    end
+#
+#    for _ in 1:n_restarts
+#        x0 = rand(Uniform(-1., 1.), d)
+#
+#
+#        if acq == knowledgeGradientHybrid || acq == knowledgeGradientDiscrete
+#            # Use a robust, derivative-free optimizer for KG functions
+#            res = optimize(objective_to_minimize,
+#                           -1, 1, x0,
+#                           Fminbox(NelderMead()))
+#        else
+#            res = optimize(objective_to_minimize,
+#                       -1. * ones(d), 1. * ones(d), x0,
+#                       Fminbox(LBFGS()); autodiff = :forward)
+#        end
+#        # The acquisition score is the negative of the optimizer's minimum
+#        current_acq_val = -res.minimum
+#        if current_acq_val > best_acq_val
+#            best_acq_val = current_acq_val
+#            best_x = res.minimizer
+#        end
+#    end
+#
+#    return best_x
+#end
 
 
 # Function to find the maximum of the posterior mean even in unvisited points.
@@ -93,22 +128,35 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
         optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=100))
     
         # Get the current best STANDARDIZED y-value
-        if optimizationSettings.acq == knowledgeGradientHybrid || optimizationSettings.acq == knowledgeGradientDiscrete
-            # For KG, we need the maximum posterior mean over the whole search area, also nonvisited points.
-            f_max_scaled = posteriorMax(gp, n_starts=10)
-        else
-            # For EI and UCB, we can use the posterior maximum at visited x-values
-            f_max_scaled = posteriorMaxObs(gp, Xscaled')
-        end
+       # if optimizationSettings.acq == knowledgeGradientHybrid || optimizationSettings.acq == knowledgeGradientDiscrete
+       #     # For KG, we need the maximum posterior mean over the whole search area, also nonvisited points.
+       #     f_max_scaled = posteriorMax(gp, n_starts=10)
+       # else
+       #     # For EI and UCB, we can use the posterior maximum at visited x-values
+       #     f_max_scaled = posteriorMaxObs(gp, Xscaled')
+       # end
         #f_max_scaled = maximum(y_scaled) # This option would be for noisefree functions.
 
         # Propose the next point using the GP trained on scaled data
+        #x_next_scaled = propose_next(gp, f_max_scaled,
+        #                             n_restarts=optimizationSettings.n_restarts,
+        #                             acq=optimizationSettings.acq,
+        #                             tuningPar=optimizationSettings.tuningPar,
+        #                             nq=optimizationSettings.nq,
+        #                             dmp=optimizationSettings.dmp
+        #)
+        # Inside your BO function
+        if optimizationSettings.acq_config isa KnowledgeGradientConfig
+            # This now works for ANY knowledge gradient method!
+            f_max_scaled = posteriorMax(gp; n_starts=10)
+        else
+            # For all other methods (EI, UCB, etc.)
+            f_max_scaled = posteriorMaxObs(gp, Xscaled')
+        end
         x_next_scaled = propose_next(gp, f_max_scaled,
-                                     n_restarts=optimizationSettings.n_restarts,
-                                     acq=optimizationSettings.acq,
-                                     tuningPar=optimizationSettings.tuningPar,
-                                     nq=optimizationSettings.nq,
-                                     dmp=optimizationSettings.dmp)
+                             n_restarts=optimizationSettings.n_restarts,
+                             acq_config=optimizationSettings.acq_config
+        )
         
         # Rescale back to original bounds to evaluate the true function
         x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]

@@ -399,7 +399,7 @@ function knowledgeGradientHybrid(gp::GPE, xnew; n_z::Int=5)
         end
 
         # Find the maximizer of this fantasy posterior
-        _, x_star_j = multi_start_maximize(μ_fantasy, lower, upper; n_starts=30)
+        _, x_star_j = multi_start_maximize(μ_fantasy, lower, upper; n_starts=10)
         push!(X_MC_cols, x_star_j)
     end
 

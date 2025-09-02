@@ -560,8 +560,11 @@ using QuadGK
 # --- Funktioner (från tidigare) ---
 
 # Samma funktion att integrera
-f(x) = exp(-(x - 2)^2) + 0.8 * exp(-(x - 4)^2 * 2)
-integral_true, _ = quadgk(f, 0, 6)
+f(x) = log.((exp(-(x - 2)^2) + 0.8 * exp(-(x - 4)^2 * 2) )*exp(randn()*0.05))
+
+fNF(x) = log.(exp(-(x - 2)^2) + 0.8 * exp(-(x - 4)^2 * 2))
+
+integral_true, _ = quadgk(fNF, 0, 6)
 
 # Symbol och hjälpfunktion för vår avancerade acquisition-funktion
 function width_in_original_scale end
@@ -635,7 +638,7 @@ function BQ_WSABI(f, modelSettings, optimizationSettings, warmStart)
     Xscaled = rescale(X, modelSettings.xBounds[1], modelSettings.xBounds[2])
 
     for i in 1:optimizationSettings.nIter
-        y_warped = log.(y .+ 1e-8)
+        y_warped = y #log.(y .+ 1e-8)
         μ_yw = mean(y_warped)
         σ_yw = max(std(y_warped), 1e-6)
         y_warped_scaled = (y_warped .- μ_yw) ./ σ_yw
@@ -675,7 +678,7 @@ function BQ_WSABI(f, modelSettings, optimizationSettings, warmStart)
     end
 
     # ... (resten av funktionen för slutgiltig GP och integral är oförändrad) ...
-    y_warped_final = log.(y .+ 1e-8)
+    y_warped_final = y#log.(y .+ 1e-8)
     μ_yw_final = mean(y_warped_final)
     σ_yw_final = max(std(y_warped_final), 1e-6)
     y_ws_final = (y_warped_final .- μ_yw_final) ./ σ_yw_final
@@ -720,7 +723,7 @@ modelSettings_bq_1d = (
 
 # --- NYTT: Inställningar för den ADAPTIVA acquisition-funktionen ---
 optimizationSettings_adaptive = (
-    nIter = 6,
+    nIter = 16,
     n_restarts = 15,
     acq = width_in_original_scale,
     dmp = nothing,
@@ -765,8 +768,8 @@ x_grid_scaled = rescale(reshape(collect(x_grid_original), :, 1),
 σ_gp_scaled = sqrt.(σ²_gp_scaled)
 
 # 4. Beräkna den sanna funktionen (samma som förut)
-y_true = f.(x_grid_original)
-y_true_warped = log.(y_true .+ 1e-8)
+y_true = fNF.(x_grid_original)
+y_true_warped = y_true #log.(y_true .+ 1e-8)
 y_true_warped_scaled = (y_true_warped .- μ_final) ./ σ_final
 
 # 5. Skapa den korrekta jämförande plotten
@@ -830,7 +833,7 @@ plot(x_grid_original, μ_gp_original,
 )
 
 # Lägg till den sanna, ursprungliga funktionen f(x)
-plot!(x_grid_original, f.(x_grid_original),
+plot!(x_grid_original, exp.(fNF.(x_grid_original)),
     label = "Sann f(x)",
     color = :black,
     linestyle = :dash,
@@ -838,7 +841,7 @@ plot!(x_grid_original, f.(x_grid_original),
 )
 
 # Lägg till de samplade punkterna (X_hist och y_hist är redan i originalskalan)
-scatter!(X_hist, y_hist,
+scatter!(X_hist, exp.(y_hist),
          label = "Samplade punkter",
          markersize = 5,
          markerstrokewidth = 1.5,

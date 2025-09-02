@@ -398,8 +398,7 @@ bo_settings = (model = model_settings_bq, opt = opt_settings_bq)
 bq_mean, bq_var, gp_posterior, theta_map_bq = approximate_smoothing_posterior(y_obs, priors_bq, bo_settings; grid_points_per_dim=9);
 
 # --- 3. Kör Gibbs-sampler ---
-# Svagt informativa prioter för varianserna (IG(0.01, 0.01))
-prior_shapes_gibbs = [0.01, 0.01]
+# Svagt informativa prioter för varianserna (IG(0.01, 0.01))prior_shapes_gibbs = [0.01, 0.01]
 prior_scales_gibbs = [0.01, 0.01]
 gibbs_results = gibbs_sampler_local_level(y_obs, prior_shapes_gibbs, prior_scales_gibbs, 40000, 5000);
 

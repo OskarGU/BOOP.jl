@@ -16,6 +16,7 @@ posteriorMax, posterior_variance
 include("bayesoptfunctions.jl")
 export BO, rescale, inv_rescale, propose_next
 
-
+include("types.jl")
+export EIConfig, UCBConfig, KGHConfig, KGDConfig, PosteriorVarianceConfig, OptimizationSettings
 
 end
