@@ -8,6 +8,9 @@ using GaussianProcesses
 include("FirstFunc.jl")
 export first_func
 
+include("types.jl")
+export EIConfig, UCBConfig, KGHConfig, KGDConfig, PosteriorVarianceConfig, OptimizationSettings
+
 include("acquisitionfunctions.jl")
 export expected_improvement, upper_confidence_bound, knowledge_gradient, knowledgeGradientMonteCarlo, 
 knowledgeGradientDiscrete, knowledgeGradientHybrid, multi_start_maximize, posterior_max, ExpectedMaxGaussian,
@@ -16,7 +19,6 @@ posteriorMax, posterior_variance
 include("bayesoptfunctions.jl")
 export BO, rescale, inv_rescale, propose_next
 
-include("types.jl")
-export EIConfig, UCBConfig, KGHConfig, KGDConfig, PosteriorVarianceConfig, OptimizationSettings
+
 
 end

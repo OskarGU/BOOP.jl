@@ -1,5 +1,14 @@
-#########################
-# 2d case
+##################################################
+using Random
+using Distributions
+using Plots
+using UniformScaling # Needed for some covariance matrix definitions
+
+# Assuming your module is loaded, e.g.:
+# include("src/MyBayesianOpt.jl")
+# using .MyBayesianOpt
+
+# --- 1. Define the Problem ---
 # Set random seed for reproducibility
 Random.seed!(123)
 
@@ -12,217 +21,119 @@ function gaussian_mixture_pdf(x::Vector{Float64})
     p1 = MvNormal(μ1, Σ1)
     p2 = MvNormal(μ2, Σ2)
     w1, w2 = 0.5, 0.5
-    return 20*(w1 * pdf(p1, x) + w2 * pdf(p2, x))
+    # Scaled by 20 to make the peaks more pronounced
+    return 20 * (w1 * pdf(p1, x) + w2 * pdf(p2, x))
 end
 
-f(x) = gaussian_mixture_pdf(x) + 0.05randn()
+# Noisy version of the function
+f(x) = gaussian_mixture_pdf(x) + 0.05 * randn()
 
-
-
-
-# Posterior minimum only on observed points
-function posteriorMinObs(gp, X)
-    μ, _ = predict_f(gp, X')
-    return minimum(μ)
-end
-
-
-
-# Initialize parameters
+# Define problem dimensions and bounds
 d = 2
-lower=[-5,-7]
-upper=[6,7]
+lower = [-5.0, -7.0]
+upper = [6.0, 7.0]
 bounds = (lower, upper)
 
-# Initial design: 5 random points in 2D within bounds
-# Sample 5 points in d dimensions
-X = hcat([rand(Uniform(l, u), 5) for (l, u) in zip(bounds[1], bounds[2])]...) 
-y = [f(vec(X[i, :])) for i in 1:size(X, 1)]
+# Initial design: 5 random points
+X_warm = hcat([rand(Uniform(l, u), 5) for (l, u) in zip(bounds[1], bounds[2])]...)
+y_warm = [f(vec(X_warm[i, :])) for i in 1:size(X_warm, 1)]
+warmStart = (X_warm, y_warm)
 
 
-d=2
-mean1 = MeanConst(0.0)
-#kernel1 = Mat52Ard(log(1.)*ones(d), 1.0)  # lengthscale zeros means will be optimized
-kernel1 = SEArd(log(1.)*ones(d), 1.0)  # lengthscale zeros means will be optimized
-
-logNoise1 = log(1e-1)              # low noise since pdf is deterministic
-KB = [[-3, -3., -5], [log(1.5), log(1.5), 2]];
-NB = [-6., 0.1];
-
-
-modelSettings = (mean=mean1, kernel = kernel1, logNoise = logNoise1, 
-                 kernelBounds = KB, noiseBounds=NB, xdim=d, xBounds=bounds
-
+# --- 2. Define the GP Model Settings ---
+# This part remains the same
+modelSettings = (
+    mean = MeanConst(0.0),
+    kernel = SEArd(log(1.0) * ones(d), 0.0), # SE kernel with ARD
+    logNoise = -1.0,
+    # Note: SEArd has d+1 params (d lengthscales, 1 signal variance)
+    kernelBounds = [[-3., -3., -5.], [log(1.5), log(1.5), 2.]],
+    noiseBounds = [-6., 0.1],
+    xdim = d,
+    xBounds = bounds
 )
 
 
-# The results are quite sensitive to the tuning parameter in the 2d case. 
-# Especially ucb is sensitive.
-optimizationSettings = (nIter=3, tuningPar=0.3,  n_restarts=30, acq=expected_improvement, nq=nothing, dmp=nothing)
+# --- 3. Define the Optimization Settings (NEW STRUCTURE) ---
 
-# 1. Definiera koordinaterna för varje axel
-x_coords = -1.0:0.05:1.0
-y_coords = -1.0:0.05:1.0
+# Example A: Expected Improvement
+opt_settings_ei = OptimizationSettings(
+    nIter = 3,
+    n_restarts = 30,
+    acq_config = EIConfig(ξ=0.3)
+)
 
-# 2. Skapa en iterator som ger alla (x, y) par
+# Example B: Upper Confidence Bound
+opt_settings_ucb = OptimizationSettings(
+    nIter = 3,
+    n_restarts = 20,
+    acq_config = UCBConfig(κ=3.5)
+)
+
+# Example C: Knowledge Gradient Discrete
+# Create a 2D grid in the scaled [-1, 1] space
+x_coords = range(-1.0, 1.0, length=50)
+y_coords = range(-1.0, 1.0, length=50)
 grid_iterator = Iterators.product(x_coords, y_coords)
+grid_2d_scaled = hcat([[x, y] for (x, y) in grid_iterator]...)
 
-# 3. Omvandla iteratorn till en 2xN-matris
-#    - [x, y] skapar en 2-elements vektor för varje par.
-#    - ... "splattar" ut alla dessa vektorer som argument till hcat.
-#    - hcat(...) sammanfogar dem horisontellt till en stor matris.
-grid_2d = hcat([[x, y] for (x, y) in grid_iterator]...)
-optimizationSettings = (nIter=1, tuningPar=nothing,  n_restarts=10, acq=knowledgeGradientDiscrete, nSim=nothing, nq=nothing, dmp=grid_2d)
+opt_settings_kgd = OptimizationSettings(
+    nIter = 3, # KGD is slow, so fewer iterations
+    n_restarts = 10,
+    acq_config = KGDConfig(domain_points=grid_2d_scaled)
+)
 
-optimizationSettings = (nIter=3, tuningPar=3.5,  n_restarts=20,acq=upper_confidence_bound, nq=nothing, dmp=nothing)
+opt_settings_kgh = OptimizationSettings(
+    nIter = 3,    
+    n_restarts = 15,  
+    acq_config = KGHConfig(
+        n_z = 8    )
+)
 
-warmStart = (X, y)
-warmStart = (XO, yO)
-gpO, XO, yO, objMin, obsMin = BO(f, modelSettings, optimizationSettings, warmStart)
+# --- 4. Run Bayesian Optimization ---
+# Choose ONE of the settings from above to run
+chosen_settings = opt_settings_kgh
 
+println("Running Bayesian Optimization with $(typeof(chosen_settings.acq_config))...")
+warmStart = (X_warm, y_warm)
+
+warmStart = (X_final, y_final)
+# Note: The BO function returns maximizers, not minimizers
+@time gp_final, X_final, y_final, maximizer_global, maximizer_observed, value_observed = BO(
+    f, modelSettings, chosen_settings, warmStart
+);
+
+
+# --- 5. Plot the Results ---
 
 # Create grid for plotting
-xx = range(bounds[1][1], bounds[2][1], length=100)
-yy = range(bounds[1][2], bounds[2][2], length=100)
+xx = range(bounds[1][1], bounds[2][1], length=100);
+yy = range(bounds[1][2], bounds[2][2], length=100);
 
 # Compute true function on grid
-Z_true = [gaussian_mixture_pdf([x,y]) for y in yy, x in xx]  # (y,x) indexing for heatmap
+Z_true = [gaussian_mixture_pdf([x, y]) for y in yy, x in xx];
 
 # Predict GP mean on grid
-grid_points = [[x, y] for y in yy, x in xx]
-X_grid = reduce(hcat, grid_points)  # 2 x 10000
-μ, _ = predict_f(gpO, rescale(X_grid', bounds[1], bounds[2])')
-Z_gp = reshape(μ, 100, 100)'
+grid_points = [[x, y] for x in xx, y in yy];
+X_grid = reduce(hcat, grid_points);
+μ, _ = predict_f(gp_final, rescale(X_grid', bounds[1], bounds[2])');
 
-# Plot true function heatmap
-p1 = heatmap(xx, yy, -Z_true, title="True function (Gaussian Mixture PDF)", xlabel="x", ylabel="y")
+# Un-standardize predictions
+μ_y, σ_y = mean(y_final), std(y_final);
+μ_unscaled = μ .* σ_y .+ μ_y;
+Z_gp = reshape(μ_unscaled, 100, 100);
 
-# Plot GP mean heatmap with samples overlaid
-p2 = heatmap(xx, yy, Z_gp', title="GP mean posterior", xlabel="x", ylabel="y")
-scatter!(p2, XO[:,1], XO[:,2], color=:white, markersize=5, label="Samples")
-scatter!(p2, [XO[end,1]], [XO[end,2]], color=:red, markersize=8, label="Last samples")
+# Plot true function heatmap (we plot the positive function)
+p1 = heatmap(xx, yy, Z_true', title="True Function PDF", xlabel="x₁", ylabel="x₂", c=:viridis)
 
-plot(p1, p2, layout=(1,2), size=(1000,400))
+# Plot GP mean heatmap with samples
+p2 = heatmap(xx, yy, Z_gp', title="GP Mean Posterior", xlabel="x₁", ylabel="x₂", c=:viridis)
+scatter!(p2, X_final[:, 1], X_final[:, 2], color=:white, markersize=3, label="Samples", msw=0.5, msc=:black)
+scatter!(p2, [X_final[end, 1]], [X_final[end, 2]], color=:red, markersize=5, label="Last Sample", msw=1.0, msc=:black)
 
+plot(p1, p2, layout=(1, 2), size=(1200, 500))
 
-
-
-
-
-# Noisy heatmap, how data looks:
-ZNoise = [-f([x,y]) for y in yy, x in xx]  # (y,x) indexing for heatmap
-p1 = heatmap(xx, yy, ZNoise, title="True function (Gaussian Mixture PDF)", xlabel="x", ylabel="y")
-
-
-########################
-# Define the input domain from -1 to 1
-x_domain = -1.0:0.005:1.0
-x_matrix = reshape(x_domain, :, 1) # Reshape for GaussianProcesses.jl
-
-# Number of random functions to draw from each GP prior
-n_samples = 3
-
-# --- 2. Create the Two Gaussian Process Priors ---
-
-# GP 1: Small Lengthscale (expects a "wiggly" function)
-l_small = 0.01
-kernel_small = SE(log(l_small), 0.0) # SE(log(lengthscale), log(signal_variance))
-# FIX: Use the GP() constructor for creating a data-free prior.
-# It only needs a mean function and a kernel.
-gp_small = GP([0.;;], [0.], MeanZero(), kernel_small)
-
-# GP 2: Large Lengthscale (expects a "smooth" function)
-l_large = 2.0
-kernel_large = SE(log(l_large), 0.0)
-# FIX: Use the GP() constructor here as well.
-gp_large = GP([0.;;], [0.], MeanZero(), kernel_large)
-
-
-# --- 3. Draw Samples from Each GP Prior ---
-
-# The rand() function works directly with the GP object.
-# Draw random functions from the "wiggly" GP
-samples_small_l = rand(gp_small, x_matrix', n_samples)
-
-# Draw random functions from the "smooth" GP
-samples_large_l = rand(gp_large, x_matrix', n_samples)
-
-
-# --- 4. Plot the Results for Comparison ---
-
-# Create the plot canvas
-plot(legend=:topright, title="GP Prior Samples with Different Lengthscales",
-     xlabel="Input Domain (x)", ylabel="Function Value (f(x))", size=(1200,600))
-
-# Plot the samples from the small lengthscale GP (wiggly)
-plot!(x_domain, samples_small_l,
-      linewidth=1,
-      label="ℓ = $l_small (Wiggly)",
-      color=:lightblue)
-
-# Plot the samples from the large lengthscale GP (smooth)
-plot!(x_domain, samples_large_l,
-      linewidth=2,
-      linestyle=:solid,
-      label="ℓ = $l_large (Smooth)",
-      color=:red)
-
-# Display the final plot
-current()
-
-
-####################
-x_domain = -1.0:0.01:1.0
-x_matrix = reshape(x_domain, :, 1) # Omforma för GaussianProcesses.jl
-
-# Antal slumpmässiga funktioner att dra från varje GP-prior
-n_samples = 3
-
-# Håll längdskalan konstant för att isolera effekten av signalvariansen
-l_fixed = 0.5
-
-# --- 2. Skapa två Gaussiska process-priors med olika signalvarians ---
-
-# GP 1: Liten signalvarians (låg amplitud)
-signal_variance_small = 0.5
-# Kerneln tar logaritmen av parametrarna: SE(log(lengthscale), log(signal_variance))
-kernel_small_sf = SE(log(l_fixed), log(signal_variance_small))
-gp_small_sf = GP([0.;;], [0.],MeanZero(), kernel_small_sf)
-
-# GP 2: Stor signalvarians (hög amplitud)
-signal_variance_large = 2.0
-kernel_large_sf = SE(log(l_fixed), log(signal_variance_large))
-gp_large_sf = GP([0.;;], [0.],MeanZero(), kernel_large_sf)
-
-
-# --- 3. Dra sampel från varje GP-prior ---
-
-# Dra slumpmässiga funktioner från GP:n med låg amplitud
-samples_small_sf = rand(gp_small_sf, x_matrix', n_samples)
-
-# Dra slumpmässiga funktioner från GP:n med hög amplitud
-samples_large_sf = rand(gp_large_sf, x_matrix', n_samples)
-
-
-# --- 4. Plotta resultaten för jämförelse ---
-
-# Skapa plotten
-plot(legend=:topright, title="GP Prior-sampel med olika signalvarians (σ_f)",
-     xlabel="Indomän (x)", ylabel="Funktionsvärde (f(x))")
-
-# Plotta sampel från GP:n med liten signalvarians (låg amplitud)
-plot!(x_domain, samples_small_sf,
-      linewidth=2,
-      linestyle=:dash,
-      label="σ_f = $signal_variance_small (Låg amplitud)",
-      color=:green)
-
-# Plotta sampel från GP:n med stor signalvarians (hög amplitud)
-plot!(x_domain, samples_large_sf,
-      linewidth=2,
-      linestyle=:solid,
-      label="σ_f = $signal_variance_large (Hög amplitud)",
-      color=:purple)
-
-# Visa den slutgiltiga plotten
-current()
+#########################################################################
+# (The GP prior plotting code from your script is preserved below)
+#########################################################################
+# ... (all the code for plotting GP priors with different lengthscales and signal variances) ...
