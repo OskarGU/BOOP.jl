@@ -2,6 +2,8 @@
 using Random
 using Distributions
 using Plots
+using GaussianProcesses
+using BOOP
 using UniformScaling # Needed for some covariance matrix definitions
 
 # Assuming your module is loaded, e.g.:
@@ -30,7 +32,7 @@ f(x) = gaussian_mixture_pdf(x) + 0.05 * randn()
 
 # Define problem dimensions and bounds
 d = 2
-lower = [-5.0, -7.0]
+lower = [-5.0, -6.0]
 upper = [6.0, 7.0]
 bounds = (lower, upper)
 
@@ -85,21 +87,34 @@ opt_settings_kgd = OptimizationSettings(
 
 opt_settings_kgh = OptimizationSettings(
     nIter = 3,    
-    n_restarts = 15,  
+    n_restarts = 10,  
     acq_config = KGHConfig(
-        n_z = 8    )
+        n_z = 40    )
 )
+
+opt_settings_kgq = OptimizationSettings(
+    nIter = 2,       # Antal BO-iterationer
+    n_restarts = 10,  # Antal starter för att optimera acquisition-funktionen
+    acq_config = KGQConfig(
+        n_z = 20,      # Fler punkter för en bättre integral-approximation
+        alpha = 0.8,   # Starkt fokus på svansarna (mer exploration)
+        n_starts = 10  # Antal starter för *varje* inre max-problem
+    )
+)
+
+# Välj denna konfiguration för din körning
+chosen_settings = opt_settings_kgq
 
 # --- 4. Run Bayesian Optimization ---
 # Choose ONE of the settings from above to run
-chosen_settings = opt_settings_kgh
+chosen_settings = opt_settings_ei
 
 println("Running Bayesian Optimization with $(typeof(chosen_settings.acq_config))...")
 warmStart = (X_warm, y_warm)
 
 warmStart = (X_final, y_final)
 # Note: The BO function returns maximizers, not minimizers
-@time gp_final, X_final, y_final, maximizer_global, maximizer_observed, value_observed = BO(
+@time gp_final, X_final, y_final, maximizer_global, global_max, maximizer_observed, observed_max = BO(
     f, modelSettings, chosen_settings, warmStart
 );
 
@@ -133,7 +148,3 @@ scatter!(p2, [X_final[end, 1]], [X_final[end, 2]], color=:red, markersize=5, lab
 
 plot(p1, p2, layout=(1, 2), size=(1200, 500))
 
-#########################################################################
-# (The GP prior plotting code from your script is preserved below)
-#########################################################################
-# ... (all the code for plotting GP priors with different lengthscales and signal variances) ...

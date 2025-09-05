@@ -34,3 +34,10 @@ end
     n_restarts::Int
     acq_config::AcquisitionConfig # This will hold one of the structs from above
 end
+
+# Experiment med kvadratur ist för MC för KGH,
+@kwdef struct KGQConfig <: KnowledgeGradientConfig # Q för Quadrature
+    n_z::Int = 30
+    alpha::Float64 = 0.5
+    n_starts::Int = 15
+end

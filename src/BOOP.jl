@@ -9,7 +9,7 @@ include("FirstFunc.jl")
 export first_func
 
 include("types.jl")
-export EIConfig, UCBConfig, KGHConfig, KGDConfig, PosteriorVarianceConfig, OptimizationSettings
+export EIConfig, UCBConfig, KGHConfig, KGDConfig, KGQConfig, PosteriorVarianceConfig, OptimizationSettings
 
 include("acquisitionfunctions.jl")
 export expected_improvement, upper_confidence_bound, knowledge_gradient, knowledgeGradientMonteCarlo, 

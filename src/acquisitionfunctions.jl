@@ -418,6 +418,52 @@ function knowledgeGradientHybrid(gp::GPE, xnew; n_z::Int=5)
 end
 
 
+# Fortfarande ett experiment, istället för montecarlo så gör man kvadratur.
+function knowledgeGradientQuadrature(gp::GPE, xnew; n_z::Int=20, alpha::Float64=0.5, n_starts::Int=15)
+    d = gp.dim
+    xvec = xnew isa Number ? [xnew] : xnew
+    xnew_scaled = reshape(xvec, :, 1)
+
+    # --- Steg 1: Hitta nuvarande maximum (vår baslinje) ---
+    μ_current_func(x) = predict_f(gp, reshape(x, :, 1))[1][1]
+    lower = -1.0 * ones(d)
+    upper = 1.0 * ones(d)
+    max_μ_current, _ = multi_start_maximize(μ_current_func, lower, upper; n_starts=n_starts*2)
+
+    # --- Steg 2: Förbered för kvadratur-beräkningen (Beta-tricket) ---
+    linear_probabilities = range(1e-6, 1.0 - 1e-6, length=n_z)
+    tail_focused_probabilities = quantile.(Beta(alpha, alpha), linear_probabilities)
+    Z_h = quantile.(Normal(), tail_focused_probabilities)
+    
+    p_ext = [0.0; tail_focused_probabilities; 1.0]
+    quadrature_weights = [(p_ext[i+1] - p_ext[i-1]) / 2 for i in 2:(length(p_ext)-1)]
+    
+    # --- Steg 3: Beräkna maximum för varje fantasi ---
+    fantasy_max_values = zeros(n_z)
+    for (i, z_val) in enumerate(Z_h)
+        function μ_fantasy(x_scaled)
+            x_scaled_mat = reshape(x_scaled, d, 1)
+            μ_current, _ = predict_f(gp, x_scaled_mat)
+            _, σ²_y_new = predict_y(gp, xnew_scaled)
+            σ_y_new = sqrt(max(σ²_y_new[1], 1e-8))
+            post_cov_vec = posterior_cov(gp, x_scaled_mat, xnew_scaled)
+            σ̃ = post_cov_vec ./ σ_y_new
+            fantasy_mean = vec(μ_current) .+ σ̃ .* z_val
+            return fantasy_mean[1]
+        end
+        max_val, _ = multi_start_maximize(μ_fantasy, lower, upper; n_starts=n_starts)
+        fantasy_max_values[i] = max_val
+    end
+
+    # --- Steg 4: Beräkna det viktade förväntningsvärdet ---
+    expected_max_future = sum(fantasy_max_values .* quadrature_weights)
+
+    # --- Steg 5: Slutgiltigt KG-värde ---
+    kg_value = expected_max_future - max_μ_current
+    
+    return max(kg_value, 0.0) # KG ska inte vara negativ
+end
+
 
 
 
