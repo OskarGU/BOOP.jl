@@ -424,7 +424,6 @@ end
     knowledgeGradientHybrid(gp, xnew, lower, upper; n_z=5)
 
 Calculates the Hybrid Knowledge Gradient (KGh) acquisition function for a candidate point `xnew`.
-This version is designed for MAXIMIZATION problems.
 
 The Hybrid KG combines the strengths of the Monte-Carlo and Discrete KG methods. It uses
 a small, deterministic set of `n_z` fantasy scenarios to identify a high-potential
