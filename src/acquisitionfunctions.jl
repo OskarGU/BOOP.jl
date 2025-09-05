@@ -68,7 +68,28 @@ end
 
 
 
-# Expected Improvement (EI) acquisition function with boundary penalty
+# Expected Improvement (EI) acquisition function with boundary penalty. EXPERIMENTAL!
+"""
+    expected_improvement_boundary(gp, xnew, ybest; ξ = 0.10, bounds=nothing)
+
+Computes the Expected Improvement (EI) with an optional penalty for points
+near the boundary of the search space. VERY EXPERIMENTAL.
+
+The penalty is a multiplicative weight `w = prod(1 - x_norm^2)` that smoothly
+pushes the search away from the edges of the scaled `[-1, 1]` domain. This
+can be useful to prevent the optimizer from selecting points at the very edge
+of the feasible region. The idea comes from practical experience that EI otherwise spent too much time exploring the boundaries.
+
+# Arguments
+- `gp`: The trained Gaussian Process model.
+- `xnew`: The candidate point at which to evaluate the EI.
+- `ybest`: The current best observed value.
+- `ξ`: The exploration-exploitation trade-off parameter.
+- `bounds`: A tuple `(lower, upper)` defining the original search space, required for the penalty.
+
+# Returns
+- `Float64`: The (potentially penalized) Expected Improvement value.
+"""
 function expected_improvement_boundary(gp, xnew, ybest; ξ = 0.10, bounds=nothing)
     xvec = xnew isa Number ? [xnew] : xnew
     xvec = reshape(xvec, :, 1)
@@ -84,9 +105,7 @@ function expected_improvement_boundary(gp, xnew, ybest; ξ = 0.10, bounds=nothin
     # Apply boundary penalty if bounds are provided
     if bounds !== nothing
         a, b = bounds
-        # Normalize x to [-1, 1] per dimension
         xnorm = 2 .* ((xvec[:,1] .- a) ./ (b .- a)) .- 1
-        # Compute weight: product of (1 - normalized^2)
         w = prod(1 .- xnorm.^2)
         ei_val *= w
     end
@@ -96,22 +115,18 @@ end
 
 
 
-
-
-
 """
     knowledgeGradientMonteCarlo(gp, xnew, lower, upper; n_samples=20)
 
-Calculates the Knowledge Gradient (KG) acquisition function for a candidate point `xnew`.
-This version is designed for MAXIMIZATION problems.
+Calculates the Knowledge Gradient (KG) acquisition function for a candidate point `xnew` using Monte Carlo.
+This version gives a noisy surface to the optimization landscape due to MC variation. Try the "quadrature methods below".
 
 The Knowledge Gradient quantifies the expected increase in the maximum estimated
-value after sampling at `xnew`. This implementation uses Monte Carlo simulation.
+value after sampling at `xnew`.
 
 # Arguments
 - `gp::GPE`: The trained Gaussian Process model.
 - `xnew`: The candidate point at which to evaluate the KG.
-- `lower`, `upper`: The bounds of the search domain for finding the posterior maximum.
 - `n_samples::Int`: The number of Monte Carlo samples to use.
 
 # Returns
@@ -129,11 +144,11 @@ function knowledgeGradientMonteCarlo(gp, xnew; n_samples::Int=200)
     upper= fill(1.0, d)
     max_μ_current, _ = multi_start_maximize(μ_current, lower, upper; n_starts=40)
 
-    # 2. Get the predictive distribution at the candidate point `xnew`. (No change needed)
+    # 2. Get the predictive distribution at the candidate point `xnew`.
     μ_new_point, σ²_new_point = predict_y(gp, xnew)
     predictive_dist = Normal(μ_new_point[1], sqrt(max(σ²_new_point[1], 1e-6)))
 
-    # 3. Run Monte Carlo simulation to estimate the expected future MAXIMUM.
+    # 3. Run Monte Carlo simulation to estimate the expected future maximum.
     future_maximums = zeros(n_samples)
     for i in 1:n_samples
         # a. Draw one potential future observation `y_sample` at `xnew`.
@@ -144,7 +159,7 @@ function knowledgeGradientMonteCarlo(gp, xnew; n_samples::Int=200)
         y_updated = vcat(gp.y, y_sample)
         gp_fantasy = GP(x_updated, y_updated, gp.mean, gp.kernel, gp.logNoise)
 
-        # c. Find the MAXIMUM of the posterior mean of this new fantasy GP.
+        # c. Find the maximum of the posterior mean of this new fantasy GP.
         μ_fantasy(x) = predict_f(gp_fantasy, reshape(x, :, 1))[1][1]
         future_maximums[i], _ = multi_start_maximize(μ_fantasy, lower, upper; n_starts=10)
     end
@@ -152,21 +167,34 @@ function knowledgeGradientMonteCarlo(gp, xnew; n_samples::Int=200)
     # 4. Calculate the expected value of the future maximum.
     expected_max_μ_future = mean(future_maximums)
 
-    # 5. The KG is the expected INCREASE in the MAXIMUM.
+    # 5. The KG is the expected increase in the maximum.
     kg = expected_max_μ_future - max_μ_current
 
-    # 6. Return the natural, positive KG value.
-    #    The optimization loop is responsible for negating this if it uses a minimizer.
     return kg
 end
 
 
 
 
-
 """
-Performs multi-start minimization and returns both the minimum value
-and the location (argmin) where it was found.
+    multi_start_minimize(f, lower, upper; n_starts=20)
+
+Finds the global minimum of a function `f` within a given box `[lower, upper]`
+by using multiple starting points.
+
+This function uses the L-BFGS optimizer from `Optim.jl` together with autodiff, starting from `n_starts`
+evenly spaced points within the domain to increase the probability of finding a
+global, rather than local, minimum.
+
+# Arguments
+- `f`: The function to minimize.
+- `lower`: A vector of lower bounds.
+- `upper`: A vector of upper bounds.
+- `n_starts::Int`: The number of distinct starting points to use.
+
+# Returns
+- `Tuple{Float64, Vector{Float64}}`: A tuple `(best_min, best_argmin)` containing
+  the minimum value found and the location where it was found.
 """
 function multi_start_minimize(f, lower, upper; n_starts=20)
      if !isa(lower, AbstractVector)
@@ -195,28 +223,48 @@ function multi_start_minimize(f, lower, upper; n_starts=20)
 end
 
 
-# 2. Modify the maximize helper to pass through both results
 """
-Performs multi-start maximization and returns both the maximum value
-and the location (argmax) where it was found.
+    multi_start_maximize(f, lower, upper; n_starts=20)
+
+Finds the global maximum of a function `f` within a given box `[lower, upper]`
+by using multiple starting points. This is a wrapper around `multi_start_minimize`
+that simply minimizes the negative of the function.
+
+# Arguments
+- `f`: The function to maximize.
+- `lower`: A vector of lower bounds.
+- `upper`: A vector of upper bounds.
+- `n_starts::Int`: The number of distinct starting points to use.
+
+# Returns
+- `Tuple{Float64, Vector{Float64}}`: A tuple `(best_max, best_argmax)` containing
+  the maximum value found and the location where it was found.
 """
 function multi_start_maximize(f, lower, upper; n_starts=20)
     objective_to_minimize = x -> -f(x)
-    
-    # Get both the minimum value and the argmin from the helper
     min_val, argmin_x = multi_start_minimize(objective_to_minimize, lower, upper; n_starts=n_starts)
-    
-    # The maximum is -min_val, and the argmax is the same as the argmin of the negative function
     return (-min_val, argmin_x)
 end
 
 
 
-##########################
 """
-Calculates E[max(μ + σZ)] where Z ~ N(0,1).
-This is a robust, "pure" version that ONLY returns the expected maximum.
-It handles cases where slopes (σ) are equal or nearly equal.
+    ExpectedMaxGaussian(μ::Vector{Float64}, σ::Vector{Float64})
+
+Analytically computes the expectation `E[max(μ + σZ)]` where `Z ~ N(0,1)`.
+
+This is the core for `knowledgeGradientDiscrete`. It calculates
+the expected maximum of a set of correlated Gaussian random variables that share
+a single source of randomness, `Z`. The function is robust to cases where
+slopes (`σ`) are equal or nearly equal.
+
+# Arguments
+- `μ::Vector{Float64}`: A vector of the current means of the random variables.
+- `σ::Vector{Float64}`: A vector of the sensitivities ("slopes") of each random
+  variable with respect to the common random factor `Z`.
+
+# Returns
+- `Float64`: The analytically computed expected maximum value.
 """
 function ExpectedMaxGaussian(μ::Vector{Float64}, σ::Vector{Float64})
     if length(μ) != length(σ)
@@ -276,9 +324,23 @@ end
 
 
 """
-Computes the posterior covariance between points in the GP. 
-"""
+    posterior_cov(gp::GPE, X1::AbstractMatrix, X2::AbstractMatrix)
 
+Computes the posterior covariance matrix `k_n(X1, X2)` between two sets of
+points `X1` and `X2`, given the GP's training data.
+
+The calculation uses the formula `k(X1, X2) - k(X1, X) * K_inv * k(X, X2)`,
+using the pre-computed Cholesky factorization of the GP's kernel matrix
+for high efficiency.
+
+# Arguments
+- `gp::GPE`: The trained Gaussian Process model.
+- `X1::AbstractMatrix`: A `d x n1` matrix of `n1` points.
+- `X2::AbstractMatrix`: A `d x n2` matrix of `n2` points.
+
+# Returns
+- `Matrix{Float64}`: The `n1 x n2` posterior covariance matrix.
+"""
 function posterior_cov(gp::GPE, X1::AbstractMatrix, X2::AbstractMatrix)
     # Formeln är: k_n(X1, X2) = k(X1, X2) - k(X1, X) * K_inv * k(X, X2)
     # där K = k(X,X) + σ_n²*I
@@ -294,7 +356,6 @@ function posterior_cov(gp::GPE, X1::AbstractMatrix, X2::AbstractMatrix)
     # L*L' * M = prior_cov_X2  =>  L' * M = L \ prior_cov_X2  =>  M = L' \ (L \ prior_cov_X2)
     K_inv_k_X2 = gp.cK \ prior_cov_X2
   
-    
     # Beräkna korrektionstermen
     correction = prior_cov_1X * K_inv_k_X2
     
@@ -305,8 +366,21 @@ end
 
 
 """
-Computes the Knowledge Gradient acquisition function for a multi-dimensional GP
-using a fixed discrete set of points.
+    knowledgeGradientDiscrete(gp, xnew, domain_points)
+
+Computes the Knowledge Gradient (KG) acquisition function where the future
+maximum is constrained to occur on a fixed, discrete set of points.
+
+This function is the analytical engine for the `knowledgeGradientHybrid` heuristic.
+
+# Arguments
+- `gp`: The trained Gaussian Process model.
+- `xnew`: The candidate point at which to evaluate the KG.
+- `domain_points`: A `d x M` matrix of `M` discrete points in the
+  scaled `[-1, 1]` space where the future maximum is sought.
+
+# Returns
+- `Float64`: The discrete Knowledge Gradient value.
 """
 function knowledgeGradientDiscrete(gp, xnew, domain_points)
     xvec = xnew isa Number ? [xnew] : xnew
@@ -419,18 +493,42 @@ end
 
 
 # Fortfarande ett experiment, istället för montecarlo så gör man kvadratur.
+"""
+    knowledgeGradientQuadrature(gp, xnew; n_z=20, alpha=0.5, n_starts=15)
+
+Computes the Knowledge Gradient (KG) using a direct and deterministic quadrature
+approximation of the expectation integral.
+
+This is faster and smoother to optimize relative to Monte Carlo and more robust than Hybrid methods. It
+uses a tail-focused quadrature scheme based on a Beta distribution transformation to
+increase exploration, while compensating with non-uniform weights to maintain an
+unbiased estimate. The resulting acquisition surface is deterministic (not noisy)
+but not necessarily smooth.
+
+# Arguments
+- `gp`: The trained Gaussian Process model.
+- `xnew`: The candidate point at which to evaluate the KG.
+- `n_z::Int`: The number of nodes (fantasy scenarios) used for the quadrature approximation.
+- `alpha::Float64`: Controls the tail-focus of the quadrature nodes. `alpha < 1.0`
+  emphasizes the tails (more exploration), while `alpha = 1.0` reverts to uniform spacing (on a cdf).
+- `n_starts::Int`: The number of restarts for the inner optimization that finds the
+  maximum of each fantasy posterior.
+
+# Returns
+- `Float64`: The Knowledge Gradient value, guaranteed to be non-negative.
+"""
 function knowledgeGradientQuadrature(gp::GPE, xnew; n_z::Int=20, alpha::Float64=0.5, n_starts::Int=15)
     d = gp.dim
     xvec = xnew isa Number ? [xnew] : xnew
     xnew_scaled = reshape(xvec, :, 1)
 
-    # --- Steg 1: Hitta nuvarande maximum (vår baslinje) ---
+    # Step 1: find current maximum of the posterior mean
     μ_current_func(x) = predict_f(gp, reshape(x, :, 1))[1][1]
     lower = -1.0 * ones(d)
     upper = 1.0 * ones(d)
     max_μ_current, _ = multi_start_maximize(μ_current_func, lower, upper; n_starts=n_starts*2)
 
-    # --- Steg 2: Förbered för kvadratur-beräkningen (Beta-tricket) ---
+    # Step 2: set up quadrature points and weights (Beta-trick)
     linear_probabilities = range(1e-6, 1.0 - 1e-6, length=n_z)
     tail_focused_probabilities = quantile.(Beta(alpha, alpha), linear_probabilities)
     Z_h = quantile.(Normal(), tail_focused_probabilities)
@@ -438,7 +536,7 @@ function knowledgeGradientQuadrature(gp::GPE, xnew; n_z::Int=20, alpha::Float64=
     p_ext = [0.0; tail_focused_probabilities; 1.0]
     quadrature_weights = [(p_ext[i+1] - p_ext[i-1]) / 2 for i in 2:(length(p_ext)-1)]
     
-    # --- Steg 3: Beräkna maximum för varje fantasi ---
+    # Step 3: compute maximum for each fantasy
     fantasy_max_values = zeros(n_z)
     for (i, z_val) in enumerate(Z_h)
         function μ_fantasy(x_scaled)
@@ -473,10 +571,29 @@ end
     posterior_variance(gp, xnew)
 
 Computes the posterior variance of the Gaussian Process `gp` at a new point `xnew`.
-This is the primary acquisition function for standard Bayesian Quadrature methods
-like WSABI, as it directs sampling to regions of highest uncertainty in the model.
 
-Returns the posterior variance at `xnew`.
+This acquisition function directs sampling to regions of highest uncertainty in the
+model. It is the primary acquisition function for standard Bayesian Quadrature
+methods like WSABI, but can also be used for pure exploration in Bayesian Optimization.
+
+# Arguments
+- `gp`: The trained Gaussian Process model.
+- `xnew`: The candidate point at which to evaluate the posterior variance.
+
+# Returns
+- `Float64`: The posterior variance at `xnew`.
+
+# Examples
+```julia-repl
+julia> X_train = [1.0, 5.0];
+julia> y_train = [sin(x) for x in X_train];
+julia> gp = GP(X_train', y_train, MeanZero(), SE(0.0, 0.0));
+julia> optimize!(gp);
+
+julia> # The point of highest uncertainty is halfway between the samples
+julia> x_candidate = 3.0;
+julia> posterior_variance(gp, x_candidate)
+1.0000010000000002
 """
 function posterior_variance(gp, xnew)
     xvec = xnew isa Number ? [xnew] : xnew

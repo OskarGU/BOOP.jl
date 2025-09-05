@@ -66,15 +66,26 @@ opt_settings_kgd = OptimizationSettings(
     acq_config = KGDConfig(domain_points=domain_points) # Contains only KGD-specific parameters
 )
 
+# Example E: Knowledge Gradient Quadrature (KGQ)
+opt_settings_kgq = OptimizationSettings(
+    nIter = 1,       # Antal BO-iterationer
+    n_restarts = 10,  # Antal starter för att optimera acquisition-funktionen
+    acq_config = KGQConfig(
+        n_z = 25,      # Fler punkter för en bättre integral-approximation
+        alpha = 0.8,   # Starkt fokus på svansarna (mer exploration)
+        n_starts = 10  # Antal starter för *varje* inre max-problem
+    )
+)
+
 
 # --- 4. Run Bayesian Optimization ---
 # Choose ONE of the settings from above to run the optimization
-chosen_settings = opt_settings_ei
+chosen_settings = opt_settings_kgq
 
 println("Running Bayesian Optimization with $(typeof(chosen_settings.acq_config))...")
-
+warmStart = (X_warm, y_warm)
 warmStart = (X_final, y_final)
-@time gp, X_final, y_final, maximizer_global, maximizer_observed, value_observed = BO(
+@time gp, X_final, y_final, maximizer_global, global_max, maximizer_observed, observed_max = BO(
     f, modelSettings, chosen_settings, warmStart
 );
 
