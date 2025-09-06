@@ -31,9 +31,9 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
 
     # Dispatch to the correct helper to get the objective function
     objective_to_minimize = _get_objective(gp, f_max, acq_config)
-
-    for _ in 1:n_restarts
-        x0 = rand(Uniform(-1., 1.), d)
+    starts =  [-ones(d) .+ (ones(d) .- -ones(d)) .* ((i .+ 0.5) ./ n_restarts) for i in 0:(n_restarts - 1)]
+    for i in 1:n_restarts
+        x0 =  starts[i]#rand(Uniform(-1., 1.), d)
 
         # Use the type to select the optimizer
         res = if acq_config isa KnowledgeGradientConfig # Use the abstract type

@@ -80,7 +80,7 @@ opt_settings_kgq = OptimizationSettings(
 
 # --- 4. Run Bayesian Optimization ---
 # Choose ONE of the settings from above to run the optimization
-chosen_settings = opt_settings_kgq
+chosen_settings = opt_settings_kgd
 
 println("Running Bayesian Optimization with $(typeof(chosen_settings.acq_config))...")
 warmStart = (X_warm, y_warm)
@@ -106,7 +106,7 @@ X_grid_scaled = rescale(x_grid', [lo], [hi]);
 plot(x_grid, f_true, label="True Function", lw=2, color=:black, legend=:bottom)
 plot!(x_grid, μ_unscaled, label="Posterior Mean", ribbon=(2*σ_unscaled, 2*σ_unscaled), lw=2, c=1)
 scatter!(X_warm, y_warm, label="Initial Points", markersize=5, color=:red)
-scatter!(X_final, y_final, label="Observed Points", markersize=5, color=:green)
+scatter!(X_final, y_final, label="Observed Points", markersize=5, color=:green,alpha=0.5)
 vline!([maximizer_observed[1]], label="Best Observed Point", lw=2, ls=:dash, color=:purple)
 title!("Bayesian Optimization Results")
 xlabel!("x")
