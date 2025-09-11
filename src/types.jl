@@ -6,22 +6,22 @@ abstract type KnowledgeGradientConfig <: AcquisitionConfig end
 
 
 # 2. Concrete structs for each acquisition function
-@kwdef struct EIConfig <: AcquisitionConfig
-    ξ::Float64
-end
-# Add a convenient constructor with a default value
-EIConfig(; ξ::Float64 = 0.01) = EIConfig(ξ)
 
-@kwdef struct UCBConfig <: AcquisitionConfig
-    κ::Float64
+# Rättad version: Standardvärde direkt i structen
+@kwdef struct EIConfig <: AcquisitionConfig
+    ξ::Float64 = 0.01
 end
-UCBConfig(; κ::Float64 = 2.0) = UCBConfig(κ)
+
+# Rättad version
+@kwdef struct UCBConfig <: AcquisitionConfig
+    κ::Float64 = 2.0
+end
 
 # Make the concrete KG structs subtypes of the new abstract type
+# Rättad version
 @kwdef struct KGHConfig <: KnowledgeGradientConfig
-    n_z::Int
+    n_z::Int = 5
 end
-KGHConfig(; n_z::Int = 5) = KGHConfig(n_z)
 
 @kwdef struct KGDConfig <: KnowledgeGradientConfig
     domain_points::Matrix{Float64}
@@ -35,7 +35,7 @@ end
     acq_config::AcquisitionConfig # This will hold one of the structs from above
 end
 
-# Experiment med kvadratur ist för MC för KGH,
+# Denna var redan korrekt och är ett bra exempel
 @kwdef struct KGQConfig <: KnowledgeGradientConfig # Q för Quadrature
     n_z::Int = 30
     alpha::Float64 = 0.5
