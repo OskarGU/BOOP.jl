@@ -101,7 +101,7 @@ $ \phi_{1,t} = sin\left(\frac{4πt}{T} \right) + 0.4, \quad \text{for }  t \in 1
 Some more info
 
 
-
+ 
 
 ```@index
 ```
