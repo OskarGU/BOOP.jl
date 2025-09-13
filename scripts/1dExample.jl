@@ -38,9 +38,9 @@ modelSettings = (
 
 # Example A: Expected Improvement (EI)
 opt_settings_ei = OptimizationSettings(
-    nIter = 1,
+    nIter = 12,
     n_restarts = 20,
-    acq_config = EIConfig(ξ=0.01) # Contains only EI-specific parameters
+    acq_config = EIConfig(ξ=0.05) # Contains only EI-specific parameters
 )
 
 # Example B: Upper Confidence Bound (UCB)
@@ -71,8 +71,8 @@ opt_settings_kgq = OptimizationSettings(
     nIter = 1,       # Antal BO-iterationer
     n_restarts = 10,  # Antal starter för att optimera acquisition-funktionen
     acq_config = KGQConfig(
-        n_z = 10,      # Fler punkter för en bättre integral-approximation
-        alpha = 1.0,   # Starkt fokus på svansarna (mer exploration)
+        n_z = 20,      # Fler punkter för en bättre integral-approximation
+        alpha = 0.8,   # Starkt fokus på svansarna (mer exploration)
         n_starts = 10  # Antal starter för *varje* inre max-problem
     )
 )

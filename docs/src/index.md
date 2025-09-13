@@ -6,13 +6,13 @@ CurrentModule = BOOP
 
 Documentation for [BOOP](https://github.com/OskarGU/BOOP.jl).
 
-This package is in experimental phase. It can be used for Bayesian optimization with aquisition functions including *Expected Improvement (EI)*, *upper confidence bound (UCB)*, and  *knowledge gradient (KG)* including the *discrete KG (KGD)*, *hybrid KG (KGH)*, *Monte Carlo KG (KGMC)* and a novel acquisition currently refered to as the *Quadrature KG (KGQ)*.
+This package is in experimental phase. It can be used for Bayesian optimization (BO) with aquisition functions including *Expected Improvement (EI)*, *upper confidence bound (UCB)*, and  *knowledge gradient (KG)* including the *discrete KG (KGD)*, *hybrid KG (KGH)*, *Monte Carlo KG (KGMC)* and a novel acquisition currently refered to as the *Quadrature KG (KGQ)*.
+
+It also supports Bayesian quadrature (BQ) methods. 
 
 
 
 # Example usage:
-
-## Bayesian Optimization using *BO()*
 
 ```julia
 using GaussianProcesses
@@ -54,16 +54,14 @@ modelSettings = (
 
 # Example A: Expected Improvement (EI)
 opt_settings_ei = OptimizationSettings(
-    nIter = 1,
+    nIter = 12,
     n_restarts = 20,
-    acq_config = EIConfig(ξ=0.01) # Contains only EI-specific parameters
+    acq_config = EIConfig(ξ=0.05) # Contains only EI-specific parameters
 )
 
-chosen_settings = opt_settings_kgd
+chosen_settings = opt_settings_kgei
 
 println("Running Bayesian Optimization with $(typeof(chosen_settings.acq_config))...")
-warmStart = (X_warm, y_warm)
-warmStart = (X_final, y_final)
 @time gp, X_final, y_final, maximizer_global, global_max, maximizer_observed, observed_max = BO(
     f, modelSettings, chosen_settings, warmStart
 );
@@ -91,9 +89,7 @@ title!("Bayesian Optimization Results")
 xlabel!("x")
 ylabel!("f(x)")
 ```
-We start by simulating a time-varying AR(2) model for illustration. We use 1000 observation and the first AR-coefficient evolves as:
 
-$ \phi_{1,t} = sin\left(\frac{4πt}{T} \right) + 0.4, \quad \text{for }  t \in 1,\dots,1000 $
 
 
 Some more info
