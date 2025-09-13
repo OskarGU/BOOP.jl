@@ -54,7 +54,7 @@ opt_settings_ucb = OptimizationSettings(
 opt_settings_kgh = OptimizationSettings(
     nIter = 1,
     n_restarts = 10,
-    acq_config = KGHConfig(n_z=10) # Contains only KGH-specific parameters
+    acq_config = KGHConfig(n_z=50) # Contains only KGH-specific parameters
 )
 
 # Example D: Knowledge Gradient Discrete (KGD)
@@ -71,8 +71,8 @@ opt_settings_kgq = OptimizationSettings(
     nIter = 1,       # Antal BO-iterationer
     n_restarts = 10,  # Antal starter för att optimera acquisition-funktionen
     acq_config = KGQConfig(
-        n_z = 25,      # Fler punkter för en bättre integral-approximation
-        alpha = 0.8,   # Starkt fokus på svansarna (mer exploration)
+        n_z = 10,      # Fler punkter för en bättre integral-approximation
+        alpha = 1.0,   # Starkt fokus på svansarna (mer exploration)
         n_starts = 10  # Antal starter för *varje* inre max-problem
     )
 )
@@ -80,7 +80,7 @@ opt_settings_kgq = OptimizationSettings(
 
 # --- 4. Run Bayesian Optimization ---
 # Choose ONE of the settings from above to run the optimization
-chosen_settings = opt_settings_kgd
+chosen_settings = opt_settings_kgq
 
 println("Running Bayesian Optimization with $(typeof(chosen_settings.acq_config))...")
 warmStart = (X_warm, y_warm)

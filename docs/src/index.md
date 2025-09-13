@@ -6,7 +6,8 @@ CurrentModule = BOOP
 
 Documentation for [BOOP](https://github.com/OskarGU/BOOP.jl).
 
-This is a get starting message to see that every thing works and we can add stuff.
+This package is in experimental phase. It can be used for Bayesian optimization with aquisition functions including *Expected Improvement (EI)*, *upper confidence bound (UCB)*, and  *knowledge gradient (KG)* including the *discrete KG (KGD)*, *hybrid KG (KGH)*, *Monte Carlo KG (KGMC)* and a novel acquisition currently refered to as the *Quadrature KG (KGQ)*.
+
 
 
 # Example usage:
