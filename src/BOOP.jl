@@ -14,7 +14,7 @@ export EIConfig, UCBConfig, KGHConfig, KGDConfig, KGQConfig, PosteriorVarianceCo
 include("acquisitionfunctions.jl")
 export expected_improvement, upper_confidence_bound, knowledge_gradient, knowledgeGradientMonteCarlo, 
 knowledgeGradientDiscrete, knowledgeGradientHybrid, multi_start_maximize, posterior_max, ExpectedMaxGaussian,
-posteriorMax, posterior_variance
+posteriorMax, posterior_variance, knowledgeGradientQuadrature
 
 include("bayesoptfunctions.jl")
 export BO, rescale, inv_rescale, propose_next

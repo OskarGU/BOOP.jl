@@ -4,7 +4,7 @@ using Distributions
 using Plots
 using GaussianProcesses
 using BOOP
-using UniformScaling # Needed for some covariance matrix definitions
+#using UniformScaling # Needed for some covariance matrix definitions
 
 # Assuming your module is loaded, e.g.:
 # include("src/MyBayesianOpt.jl")
