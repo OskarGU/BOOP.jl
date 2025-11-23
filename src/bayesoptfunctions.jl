@@ -95,7 +95,7 @@ end
 
 
 """
-    rescale(X, lo, hi)
+    rescale(X, lo, hi; integ=0)
 
 Scales an `n x d` matrix `X` from an original domain to the hypercube `[-1, 1]^d`.
 
@@ -103,6 +103,8 @@ Scales an `n x d` matrix `X` from an original domain to the hypercube `[-1, 1]^d
 - `X`: An `n x d` matrix where each row is a point in the original domain.
 - `lo`: A `d`-element vector of lower bounds for the original domain.
 - `hi`: A `d`-element vector of upper bounds for the original domain.
+- `Integ`: An integer deciding whether the last column should be scaled or not.
+
 
 # Returns
 - The scaled `n x d` matrix where all values are in `[-1, 1]`.
@@ -116,14 +118,19 @@ julia> rescale(X, lo, hi)
 2×2 Matrix{Float64}:
  0.0  0.0
 -1.0 -1.0
+```
 """
-function rescale(X, lo, hi)
+function rescale(X, lo, hi; integ=0)
     # X is n×d matrix, lo and hi are length-d vectors
-    return 2 .* (X .- lo') ./ (hi' .- lo') .- 1
+    if integ == 0
+        return 2 .* (X .- lo') ./ (hi' .- lo') .- 1
+    else
+        return hcat(2 .* (X[:,1:end-integ] .- lo') ./ (hi' .- lo') .- 1, [round.(X[:,end]);])
+    end
 end
 
 """
-    inv_rescale(X_scaled, lo, hi)
+    inv_rescale(X_scaled, lo, hi; integ = 0)
 
 Performs the inverse of `rescale`, scaling an `n x d` matrix `X_scaled` from
 the hypercube `[-1, 1]^d` back to the original domain.
@@ -132,6 +139,7 @@ the hypercube `[-1, 1]^d` back to the original domain.
 - `X_scaled`: An `n x d` matrix where each row is a point in `[-1, 1]^d`.
 - `lo`: A `d`-element vector of lower bounds for the original domain.
 - `hi`: A `d`-element vector of upper bounds for the original domain.
+- `Integ`: An integer deciding whether the last column should be scaled or not.
 
 # Returns
 - The un-scaled `n x d` matrix in the original domain.
@@ -147,7 +155,14 @@ julia> inv_rescale(X_scaled, lo, hi)
  0.0  10.0
 ```
 """ 
-inv_rescale(X_scaled, lo, hi) = ((X_scaled .+ 1) ./ 2) .* (hi' .- lo') .+ lo'
+function inv_rescale(XScaled, lo, hi; integ = 0) 
+    if integ == 0
+        ((XScaled .+ 1) ./ 2) .* (hi' .- lo') .+ lo'
+    else
+        hcat(((XScaled[:,1:end-integ] .+ 1) ./ 2) .* (hi' .- lo') .+ lo', [round.(XScaled[:,end]);])
+    end
+end
+
 
 
 
@@ -184,7 +199,8 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
         
         # Train the GP on the Standardized y-values
         gp = GP(Xscaled', y_scaled, modelSettings.mean, modelSettings.kernel, modelSettings.logNoise)
-        optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=100))
+        optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, 
+                      options=Optim.Options(iterations=100))
     
         # Select what to optimize based on the acquisition strategy.
         if optimizationSettings.acq_config isa KnowledgeGradientConfig
