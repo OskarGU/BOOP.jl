@@ -5,7 +5,8 @@
 # Our new kerel use a standard one and just make sure the kernel is constant between the discrete points.
 struct GarridoMerchanKernel{K<:Kernel} <: Kernel
     base_kernel::K
-    integer_dims::Vector{Int}
+    integer_dims::Vector{Int} # Which dimension of X that are discrete.
+    integer_ranges::Vector{UnitRange{Int}} # Range of allowed values.
 end
 
 # We need to update these functions to work with our new kernel.

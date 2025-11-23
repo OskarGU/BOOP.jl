@@ -19,6 +19,8 @@ posteriorMax, posterior_variance, knowledgeGradientQuadrature
 include("bayesoptfunctions.jl")
 export BO, rescale, inv_rescale, propose_next
 
+include("kernels.jl")
+
 
 
 end

@@ -185,10 +185,10 @@ Performs a full Bayesian Optimization run.
     - `postMaxObservedY`: The predicted posterior mean value at `postMaxObserved`.
 ...
 """
-function BO(f, modelSettings, optimizationSettings, warmStart)
+function BO(f, modelSettings, optimizationSettings, warmStart; DiscreteKern=0)
     X, y = warmStart
     # Work in the scaled space [-1, 1]^d.
-    Xscaled = rescale(X, modelSettings.xBounds[1], modelSettings.xBounds[2])
+    Xscaled = rescale(X, modelSettings.xBounds[1], modelSettings.xBounds[2], integ = DiscreteKern)
 
     for i in 1:optimizationSettings.nIter
         # Standardize y-values at the start of the loop
@@ -218,7 +218,7 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
         )
         
         # Rescale back to original scale to evaluate the true function
-        x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
+        x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2], integ=DiscreteKern)[:]
         
         # Handle 1D vs multi-D function calls
         y_next = 0.0
@@ -250,7 +250,7 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
     # (1) Global posterior mean maximum.
     final_posterior_max_result = posteriorMax(gp; n_starts=40)
     objectMaximizer_scaled = final_posterior_max_result.X_max
-    objectMaximizer = inv_rescale(objectMaximizer_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
+    objectMaximizer = inv_rescale(objectMaximizer_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2], integ=DiscreteKern)[:]
     
     # --- NEW CODE BLOCK: Rescale the global max value ---
     objectMaximizerY_scaled = final_posterior_max_result.fX_max
@@ -261,7 +261,7 @@ function BO(f, modelSettings, optimizationSettings, warmStart)
     μ_scaled, _ = predict_f(gp, Xscaled')
     maxIdx = argmax(μ_scaled)
     postMaxObserved_scaled = Xscaled[maxIdx, :]
-    postMaxObserved = inv_rescale(postMaxObserved_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2])[:]
+    postMaxObserved = inv_rescale(postMaxObserved_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2], integ=DiscreteKern)[:]
     
     # Rescale the final predicted mean back to the original y-scale.
     postMaxObservedY_scaled = μ_scaled[maxIdx]
