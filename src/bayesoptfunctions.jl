@@ -52,6 +52,135 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
 end
 
 
+# Dispached version of above, activates when the kernel of the GP is "GarridoMerchanKernel". 
+#function propose_next(gp::GPE{X,Y,M,K,P}, f_max; n_restarts::Int, acq_config::BOOP.AcquisitionConfig) where {X, Y, M, P, K<:GarridoMerchanKernel}
+#    # 1. Hämta info direkt från kernel-objektet
+#    disc_dims = gp.kernel.integer_dims
+#    disc_ranges = gp.kernel.integer_ranges
+#
+#    d = gp.dim
+#    cont_dims = setdiff(1:d, disc_dims)
+#
+#    # 2. Skapa alla kombinationer av de diskreta värdena
+#    discrete_combinations = vec(collect(Iterators.product(disc_ranges...)))
+#
+#    full_objective = _get_objective(gp, f_max, acq_config)
+#    best_acq_val = -Inf
+#    best_x_full = zeros(d)
+#
+#    # 3. Exhaustive Splitting Loop
+#    for d_vals in discrete_combinations
+#
+#        # Wrapper för att bara optimera de kontinuerliga delarna
+#        function sub_objective(x_cont)
+#            T = eltype(x_cont)
+#            x_full = zeros(T,d)
+#            if !isempty(cont_dims)
+#                x_full[cont_dims] = x_cont
+#            end
+#            x_full[disc_dims] .= d_vals # Fixera de diskreta
+#            return full_objective(x_full)
+#        end
+#
+#        # Optimera kontinuerliga variabler (om de finns)
+#        if !isempty(cont_dims)
+#            n_cont = length(cont_dims)
+#            starts = [-ones(n_cont) .+ (ones(n_cont) .- -ones(n_cont)) .* ((i .+ 0.5) ./ n_restarts) for i in 0:(n_restarts - 1)]
+#
+#            for i in 1:n_restarts
+#                x0 = starts[i]
+#                # Optimera inom boxen [-1, 1] för de kontinuerliga
+#                res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Optim.Fminbox(LBFGS()); 
+#               autodiff = :forward)
+#
+#                curr_val = -Optim.minimum(res)
+#                if curr_val > best_acq_val
+#                    best_acq_val = curr_val
+#                    best_x_full[cont_dims] = Optim.minimizer(res)
+#                    best_x_full[disc_dims] .= d_vals
+#                end
+#            end
+#        else
+#            # Endast diskreta variabler (inga kontinuerliga att optimera)
+#            val = -sub_objective(Float64[])
+#            if val > best_acq_val
+#                best_acq_val = val
+#                best_x_full[disc_dims] .= d_vals
+#            end
+#        end
+#    end
+#
+#    return best_x_full
+#end
+# Utan Autodiff (NelderMead) för att undvika Dual-number krascher.
+function propose_next(gp::GPE{X,Y,M,K,P}, f_max; n_restarts::Int, acq_config::BOOP.AcquisitionConfig) where {X, Y, M, P, K<:GarridoMerchanKernel}
+    # 1. Hämta info
+    disc_dims = gp.kernel.integer_dims
+    disc_ranges = gp.kernel.integer_ranges
+    d = gp.dim
+    cont_dims = setdiff(1:d, disc_dims)
+
+    # 2. Skapa kombinationer
+    discrete_combinations = vec(collect(Iterators.product(disc_ranges...)))
+    full_objective = _get_objective(gp, f_max, acq_config)
+    
+    best_acq_val = -Inf
+    best_x_full = zeros(d)
+
+    # Slumpa startpunkter (med marginal från kanten för säkerhets skull)
+    n_cont = length(cont_dims)
+    random_starts = [2 .* rand(n_cont) .- 1 for _ in 1:n_restarts]
+
+    # 3. Loop
+    for d_vals in discrete_combinations
+
+        # Wrapper
+        function sub_objective(x_cont)
+            # --- FIX 1: CLAMP INPUT ---
+            # Tvinga in värdet i [-1, 1] innan vi skickar det till GP:n.
+            # Detta skyddar mot att NelderMead testar 1.0000001
+            x_safe = clamp.(x_cont, -1.0, 1.0)
+            
+            x_full = zeros(d) 
+            if !isempty(cont_dims)
+                x_full[cont_dims] = x_safe
+            end
+            x_full[disc_dims] .= d_vals
+            return full_objective(x_full)
+        end
+
+        if !isempty(cont_dims)
+            for x0 in random_starts
+                # Optimera med NelderMead (Robust, inga gradienter)
+                res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(NelderMead()))
+
+                curr_val = -Optim.minimum(res)
+                
+                if curr_val > best_acq_val
+                    best_acq_val = curr_val
+                    
+                    # --- FIX 2: CLAMP OUTPUT ---
+                    # Ibland returnerar optimeraren 1.00000002. Kläm åt det.
+                    raw_minimizer = Optim.minimizer(res)
+                    best_x_full[cont_dims] = clamp.(raw_minimizer, -1.0, 1.0)
+                    
+                    best_x_full[disc_dims] .= d_vals
+                end
+            end
+        else
+            # Endast diskreta
+            val = -sub_objective(Float64[])
+            if val > best_acq_val
+                best_acq_val = val
+                best_x_full[disc_dims] .= d_vals
+            end
+        end
+    end
+
+    return best_x_full
+end
+
+
 """
     posteriorMax(gp; n_starts=20)
 
@@ -73,6 +202,69 @@ function posteriorMax(gp; n_starts=20)
     best_val, best_x = multi_start_maximize(acq_mean, -1. * ones(d), 1. * ones(d), n_starts=n_starts)
     return (fX_max = best_val, X_max = best_x)
 end
+
+
+
+#### For dispatcing to match G-M:
+function posteriorMax(gp::GPE{X,Y,M,K,P}; n_starts=20) where {X,Y,M,P,K<:BOOP.GarridoMerchanKernel}
+    # Reuse logic from propose_next but optimize post mean directly
+    disc_dims = gp.kernel.integer_dims
+    disc_ranges = gp.kernel.integer_ranges
+    d = gp.dim
+    cont_dims = setdiff(1:d, disc_dims)
+    
+    # Hämta posterior mean funktionen
+    # Notera: predict_f returnerar (mean, variance), vi vill ha mean[1]
+    acq_mean(x) = predict_f(gp, reshape(x, d, 1))[1][1]
+
+    best_val = -Inf
+    best_x_full = zeros(d)
+    
+    discrete_combinations = vec(collect(Iterators.product(disc_ranges...)))
+
+    for d_vals in discrete_combinations
+        
+        # Sub-funktion för kontinuerlig optimering
+        function sub_mean(x_cont)
+             T = eltype(x_cont)
+             x_full = zeros(T, d)
+             if !isempty(cont_dims); x_full[cont_dims] = x_cont; end
+             x_full[disc_dims] .= d_vals
+             return -acq_mean(x_full) # Minimera negativt mean = Maximera mean
+        end
+
+        if !isempty(cont_dims)
+            n_cont = length(cont_dims)
+            starts = [-ones(n_cont) .+ (ones(n_cont) .- -ones(n_cont)) .* ((i .+ 0.5) ./ n_starts) for i in 0:(n_starts - 1)]
+            
+            for i in 1:n_starts
+                x0 = starts[i]
+                res = optimize(sub_mean, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(LBFGS()); autodiff = :forward)
+                
+                curr_val = -Optim.minimum(res) # Invertera tillbaka
+                if curr_val > best_val
+                    best_val = curr_val
+                    best_x_full[cont_dims] = Optim.minimizer(res)
+                    best_x_full[disc_dims] .= d_vals
+                end
+            end
+        else
+            # Bara diskreta
+            val = acq_mean(float([d_vals...])) # predict_f vill ha float-vektor även om det är heltal
+            if val > best_val
+                best_val = val
+                best_x_full[disc_dims] .= d_vals
+            end
+        end
+    end
+    
+    return (fX_max = best_val, X_max = best_x_full)
+end
+
+
+
+
+
 
 """
     posteriorMaxObs(gp, X_scaled)
@@ -267,6 +459,107 @@ function BO(f, modelSettings, optimizationSettings, warmStart; DiscreteKern=0)
     postMaxObservedY_scaled = μ_scaled[maxIdx]
     postMaxObservedY = postMaxObservedY_scaled * σ_y_final + μ_y_final
     
-    # --- UPDATED RETURN STATEMENT ---
     return gp, X, y, objectMaximizer, objectMaximizerY, postMaxObserved, postMaxObservedY
+end
+
+# New version that takes a GP as an input. Then the user can easily specify a prior on the lengthscales and so on.
+# Main BO function
+"""
+    BO(f, gp_template, modelSettings, optimizationSettings, warmStart)
+
+Performs a full Bayesian Optimization run using a GP template.
+
+# Arguments
+- `gp_template`: A `GPE` object acting as a blueprint (containing kernel, mean, priors).
+- ... other arguments as before ...
+"""
+function BO(f, gp_template::GPE, modelSettings, optimizationSettings, warmStart; DiscreteKern=0)
+    X, y = warmStart
+    # Work in the scaled space [-1, 1]^d.
+    Xscaled = rescale(X, modelSettings.xBounds[1], modelSettings.xBounds[2], integ = DiscreteKern)
+
+    # --- ÄNDRING: Initiera spårning av kernel/noise från mallen ---
+    current_kernel = deepcopy(gp_template.kernel)
+    current_logNoise = gp_template.logNoise
+    gp = nothing # Platshållare för senaste modellen
+    # -------------------------------------------------------------
+
+     for i in 1:optimizationSettings.nIter
+         # Standardize y-values at the start of the loop
+         μ_y = mean(y)
+         # Use max to set a robust standard deviation (jitter).
+         σ_y = max(std(y), 1e-6)
+         y_scaled = (y .- μ_y) ./ σ_y
+         
+         # Train the GP on the Standardized y-values
+         # --- ÄNDRING: Bygg GP från mallen och senaste parametrarna ---
+         gp = GP(Xscaled', y_scaled, gp_template.mean, deepcopy(current_kernel), current_logNoise)
+         # -------------------------------------------------------------
+         optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, 
+                    options=Optim.Options(iterations=100))
+     
+        # --- ÄNDRING: Spara de lärda parametrarna till nästa varv ---
+        current_kernel = gp.kernel
+        current_logNoise = gp.logNoise
+        # ------------------------------------------------------------
+        # Select what to optimize based on the acquisition strategy.
+        if optimizationSettings.acq_config isa KnowledgeGradientConfig
+            # This is for any knowledge gradient method!
+            f_max_scaled = posteriorMax(gp; n_starts=10)
+        else
+            # For all other methods (EI, UCB, etc.)
+            f_max_scaled = posteriorMaxObs(gp, Xscaled')
+        end
+        # Select next evaluation point.
+        x_next_scaled = propose_next(gp, f_max_scaled,
+                                     n_restarts=optimizationSettings.n_restarts,
+                                     acq_config=optimizationSettings.acq_config
+        )
+        
+        # Rescale back to original scale to evaluate the true function
+        x_next_original = inv_rescale(x_next_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2], integ=DiscreteKern)[:]
+        
+        # Handle 1D vs multi-D function calls
+        y_next = 0.0
+        if modelSettings.xdim == 1
+            y_next = f(x_next_original[1])
+        else
+            y_next = f(x_next_original)
+        end
+        # Add the new original-scale y-value to the dataset
+        X = vcat(X, x_next_original')
+        Xscaled = vcat(Xscaled, x_next_scaled')
+        y = vcat(y, y_next)
+        println("Iter $i: x = $(round.(x_next_original, digits=3)), y = $(round(y_next, digits=3))")
+    end
+    # --- Final GP model on all data ---
+    # Standardize final y-data before fitting the final model
+    μ_y_final = mean(y)
+    # Use max to set a minimum standard deviation (jitter).
+    σ_y_final = max(std(y), 1e-6)
+    y_scaled_final = (y .- μ_y_final) ./ σ_y_final
+    
+    # --- ÄNDRING: Bygg slutlig modell med de senaste parametrarna ---
+    gp = GP(Xscaled', y_scaled_final, gp_template.mean, deepcopy(current_kernel), current_logNoise)
+    # ---------------------------------------------------------------
+    optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=500))
+    # (1) Global posterior mean maximum.
+    final_posterior_max_result = posteriorMax(gp; n_starts=40)
+    objectMaximizer_scaled = final_posterior_max_result.X_max
+    objectMaximizer = inv_rescale(objectMaximizer_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2], integ=DiscreteKern)[:]
+    
+    # --- NEW CODE BLOCK: Rescale the global max value ---
+    objectMaximizerY_scaled = final_posterior_max_result.fX_max
+    objectMaximizerY = objectMaximizerY_scaled * σ_y_final + μ_y_final
+    # ----------------------------------------------------
+    # (2) Maximum over points with the highest posterior mean among observed points
+    μ_scaled, _ = predict_f(gp, Xscaled')
+    maxIdx = argmax(μ_scaled)
+    postMaxObserved_scaled = Xscaled[maxIdx, :]
+    postMaxObserved = inv_rescale(postMaxObserved_scaled[:]', modelSettings.xBounds[1], modelSettings.xBounds[2], integ=DiscreteKern)[:]
+    
+    # Rescale the final predicted mean back to the original y-scale.
+    postMaxObservedY_scaled = μ_scaled[maxIdx]
+    postMaxObservedY = postMaxObservedY_scaled * σ_y_final + μ_y_final
+     return gp, X, y, objectMaximizer, objectMaximizerY, postMaxObserved, postMaxObservedY
 end

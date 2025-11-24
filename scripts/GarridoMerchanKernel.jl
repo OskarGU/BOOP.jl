@@ -18,7 +18,7 @@ function true_function(x_vec)
     return sin(x_cont * 2) * (z_int^2 / 1) + 0.05 * (z_int - 5)^2
 end
 
-N = 45
+N = 35
 X_train = zeros(2, N)
 
 # Continuous
@@ -47,7 +47,7 @@ startLogℓ = [0.5, 0.20]
 base_k = Matern(5/2, startLogℓ, 2.0)
 
 # Define our kernel for mixed continuous discrete, we give it the base kernel and tell it that the second input is discrete.
-gm_kernel = BOOP.GarridoMerchanKernel(base_k, [2], [1:6])
+gm_kernel = BOOP.GarridoMerchanKernel(base_k, [2], [1:16])
 
 # Fit the GP with the starting parameters.
 gp = GP(X_train, y_train, MeanZero(), gm_kernel)
@@ -92,7 +92,8 @@ ub_noise = log.([5.0])  # Max brus
 noise_bounds = [lb_noise, ub_noise]
 
 println("Training GP ...")
-@time optimize!(gp, kernbounds=kern_bounds, noisebounds=noise_bounds)
+optOptions = Optim.Options(time_limit = 1.0, show_trace = true)
+@time optimize!(gp, kernbounds=kern_bounds, noisebounds=noise_bounds, options=optOptions)
 
 println("Length scales: ", exp.(get_params(gp.kernel)[1:2]))
 println("Process variance: ", exp.(get_params(gp.kernel)[3]))
@@ -130,10 +131,10 @@ heatmap(x_grid, z_grid, Z_pred',
 
 
 # Värden att plotta den kontinuerliga variabeln (x) över
-x_plot_grid = range(0.05, 4.5, length=100)
+x_plot_grid = range(0.05, 5, length=100)
 
 # De diskreta "trappstegen" vi vill fixera (z)
-z_fixed_values = [1, 3, 2, 4]
+z_fixed_values = [1, 3, 6, 4]
 
 # Skapa en layout för 4 subplots (2x2)
 plot_layout = @layout [a b; c d]
@@ -262,3 +263,71 @@ for (idx, x_val) in enumerate(x_fixed_values)
 end
 
 display(p_steps)
+
+
+
+
+startLogℓ = [0.5, 0.20]
+base_k = Matern(5/2, startLogℓ, 2.0)
+
+# Define our kernel for mixed continuous discrete, we give it the base kernel and tell it that the second input is discrete.
+gm_kernel = BOOP.GarridoMerchanKernel(base_k, [2], [1:16])
+
+gpGM = GP(X_train, y_train, MeanZero(), gm_kernel);
+
+# --- Set priors for GP log-parameters ---
+# Note that it is the log of the scales!
+# Prior for continuous
+priorContinuous_ℓ = Normal(log(.5), 1.5)
+# Prior for discrete variable.
+# Note that it is not scaled so some care should be given.
+priorDisc_ℓ = Normal(log(1.5), 1.5)
+# Prior for signal variance
+priorProcess_σ = Normal(1.0, 3.)
+# Prior for measurement noise
+priorNoise_σ = Normal(log(0.1), 3.0)
+# Apply the prior to the GP object
+set_priors!(gpGM.logNoise, [priorNoise_σ])
+set_priors!(gpGM.kernel, [priorContinuous_ℓ, priorDisc_ℓ, priorProcess_σ])
+
+# Define some search boundaries for the optimizer, we don't want it to go completely crazy.
+# Kernel lower bounds (log-scale)
+lb_kern = log.([0.01, 0.5, 0.1]) 
+# Kernel upper bounds (log-scale)
+ub_kern = log.([10.0, 10.0, 10.0])
+kern_bounds = [lb_kern, ub_kern]
+# Same for noise bounds
+lb_noise = log.([0.1])
+ub_noise = log.([5.0])  # Max brus
+noise_bounds = [lb_noise, ub_noise]
+println("Training GP ...")
+optOptions = Optim.Options(time_limit = 1.0, show_trace = true)
+
+
+
+
+@time optimize!(gpGM, kernbounds=kern_bounds, noisebounds=noise_bounds, options=optOptions);
+
+
+BOOP.propose_next(gpGM, 15.; n_restarts=10, acq_config=EIConfig(ξ=0.05))
+
+lo = [0,1];
+hi = [5,7];
+baseReg_k = Matern(5/2, startLogℓ, 2.0)
+
+gpReg = GP(rescale(X_train', lo, hi)', y_train, MeanZero(), baseReg_k);
+@time optimize!(gpReg, kernbounds=kern_bounds, noisebounds=noise_bounds, options=optOptions);
+
+
+pn = propose_nextt(gpReg, 15.; n_restarts=10, acq_config=EIConfig(ξ=0.05))
+BOOP.inv_rescale(pn',lo,hi)  
+
+
+
+
+BOOP.posteriorMax(gpGM; n_starts=20)
+BOOP.posteriorMax(gpReg; n_starts=20)
+
+
+plot(heatmap(gpGM, title="Garrido-Merchán"),
+heatmap(gpReg, title="Regular Matérn"), size=(1400,400))

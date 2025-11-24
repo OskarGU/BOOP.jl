@@ -2,11 +2,12 @@ module BOOP
 
 # Using other packages
 using LinearAlgebra, Distributions, Random, Statistics, Optim, Plots, SpecialFunctions, StatsBase
-using GaussianProcesses
+using GaussianProcesses, ForwardDiff, LatinHypercubeSampling
 
 # Write your package code here.
-include("FirstFunc.jl")
-export first_func
+
+include("kernels.jl")
+export GarridoMerchanKernel
 
 include("types.jl")
 export EIConfig, UCBConfig, KGHConfig, KGDConfig, KGQConfig, PosteriorVarianceConfig, OptimizationSettings
@@ -19,7 +20,6 @@ posteriorMax, posterior_variance, knowledgeGradientQuadrature
 include("bayesoptfunctions.jl")
 export BO, rescale, inv_rescale, propose_next
 
-include("kernels.jl")
 
 
 

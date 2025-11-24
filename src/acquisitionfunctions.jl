@@ -197,6 +197,7 @@ global, rather than local, minimum.
   the minimum value found and the location where it was found.
 """
 function multi_start_minimize(f, lower, upper; n_starts=20)
+    T = eltype(lower) # This handles dual numbers
      if !isa(lower, AbstractVector)
          lower = [lower]
          upper = [upper]
@@ -205,7 +206,8 @@ function multi_start_minimize(f, lower, upper; n_starts=20)
      starts = [lower .+ (upper .- lower) .* ((i .+ 0.5) ./ n_starts) for i in 0:(n_starts - 1)]
 
      best_min = Inf
-     best_argmin = similar(lower)
+     d=length(lower)
+     best_argmin = zeros(T,d)
 
      for x0 in starts
          #res = optimize(f, lower, upper, x0, Fminbox(BFGS()))
@@ -221,7 +223,54 @@ function multi_start_minimize(f, lower, upper; n_starts=20)
      end
      return (best_min, best_argmin)
 end
-
+# To take dual numbers for the optimization for Garrido-Merchan anf KG.
+#function multi_start_minimize(f, lower, upper; n_starts=10)
+#    # 1. Clean bounds to generate stariting points (LHS wants Floats)
+#    lb_val = ForwardDiff.value.(lower)
+#    ub_val = ForwardDiff.value.(upper)
+#    d = length(lb_val)
+#
+#    # 2. Generate LHS-plan (start values)
+#    plan, _ = LHCoptim(n_starts, d, 50) 
+#    scaled_plan = (plan .- 1) ./ (n_starts - 1) 
+#    
+#    # Make sure start values are inside box.
+#    margin = 1e-4
+#    scaled_plan  = scaled_plan  .* (1 - 2*margin) .+ margin
+#    
+#    # Scale to the input bounds
+#    starts = [lb_val .+ (ub_val .- lb_val) .* scaled_plan[i, :] for i in 1:n_starts]
+#
+#    # Test the input function to see what it returns.
+#    # From KGH we will get duak numbers.
+#    y_test = f(starts[1])
+#    
+#    # If the function returns duals, the start values need to be duals too.
+#    # Then Optim knows it should allocate dual memory.
+#    if eltype(y_test) <: ForwardDiff.Dual
+#        starts = [s .+ zero(y_test) for s in starts]
+#    end
+#
+#    best_val = Inf
+#    # Correct type
+#    best_x = starts[1] 
+#
+#    for x0 in starts
+#
+#        res = optimize(f, lb_val, ub_val, x0, Fminbox(LBFGS()), 
+#                       Optim.Options(iterations=50); 
+#                       autodiff = :forward)
+#
+#        val = Optim.minimum(res)
+#        
+#        if val < best_val
+#            best_val = val
+#            best_x = Optim.minimizer(res)
+#        end
+#    end
+#    
+#    return best_val, best_x
+#end
 
 """
     multi_start_maximize(f, lower, upper; n_starts=20)
@@ -240,12 +289,22 @@ that simply minimizes the negative of the function.
 - `Tuple{Float64, Vector{Float64}}`: A tuple `(best_max, best_argmax)` containing
   the maximum value found and the location where it was found.
 """
-function multi_start_maximize(f, lower, upper; n_starts=20)
-    objective_to_minimize = x -> -f(x)
-    min_val, argmin_x = multi_start_minimize(objective_to_minimize, lower, upper; n_starts=n_starts)
-    return (-min_val, argmin_x)
-end
+#function multi_start_maximize(f, lower, upper; n_starts=20)
+#    objective_to_minimize = x -> -f(x)
+#    min_val, argmin_x = multi_start_minimize(objective_to_minimize, lower, upper; n_starts=n_starts)
+#    return (-min_val, argmin_x)
+#end
 
+
+function multi_start_maximize(f, lower, upper; n_starts=10)
+    # Vi återanvänder minimize genom att negera funktionen
+    # Notera: f(x) returnerar värdet vi vill maximera.
+    neg_f(x) = -f(x)
+    
+    min_val, argmin = multi_start_minimize(neg_f, lower, upper; n_starts=n_starts)
+    
+    return -min_val, argmin
+end
 
 
 """
@@ -266,13 +325,14 @@ slopes (`σ`) are equal or nearly equal.
 # Returns
 - `Float64`: The analytically computed expected maximum value.
 """
-function ExpectedMaxGaussian(μ::Vector{Float64}, σ::Vector{Float64})
+function ExpectedMaxGaussian(μ::AbstractVector, σ::AbstractVector)
     if length(μ) != length(σ)
         error("Input vectors μ and σ must have the same length.")
     end
+    T = promote_type(eltype(μ), eltype(σ))
     d = length(μ)
     if d == 0
-        return 0.0
+        return zero(T)
     elseif d == 1
         return μ[1] # E[μ+σZ] = μ
     end
@@ -282,7 +342,7 @@ function ExpectedMaxGaussian(μ::Vector{Float64}, σ::Vector{Float64})
     μ_sorted, σ_sorted = μ[O], σ[O]
     
     I = [1]
-    Z_tilde = [-Inf]
+    Z_tilde = T[-Inf]
 
     for i in 2:d
         while !isempty(I)
