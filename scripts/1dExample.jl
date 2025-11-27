@@ -80,7 +80,7 @@ opt_settings_kgq = OptimizationSettings(
 
 # --- 4. Run Bayesian Optimization ---
 # Choose ONE of the settings from above to run the optimization
-chosen_settings = opt_settings_kgq
+chosen_settings = opt_settings_ei
 
 println("Running Bayesian Optimization with $(typeof(chosen_settings.acq_config))...")
 warmStart = (X_warm, y_warm)
