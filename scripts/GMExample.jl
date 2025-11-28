@@ -62,7 +62,7 @@ modelSettings = (
     xBounds = ([x_lo, x_hi]) 
 )
 
-opt_settings = OptimizationSettings(
+optSettings = OptimizationSettings(
     nIter = 3,          
     n_restarts = 10,
     acq_config = EIConfig(ξ=0.1) 
@@ -70,16 +70,61 @@ opt_settings = OptimizationSettings(
     #acq_config = KGHConfig(n_z=50)
 )
 
+
+#============================================================#
+# Set some priors on the kernel hyperparameters.
+#=====================================================#
+
+# 
+
+# Since GaussianProcesses.jl optimizes in log-space, we use Normal priors.
+# Normal(μ, σ) on log(θ) corresponds to LogNormal on θ.
+
+# Prior for Continuous Variable (x1)
+# Range is [-1, 1] (width 2). We want a length scale around 0.5.
+# Normal(0.0, 1.0) => Median length scale exp(0) = 1.0.
+prior_cont = Normal(-0.5, 0.5)
+
+# Prior for Discrete Variable (x2)
+# Step size is 1.0. To avoid the "Independence Trap" (where the GP treats neighbors
+# as unrelated), the length scale MUST be > 1.0.
+# We aim for a length scale around 3.0 (exp(1.1)).
+# We set mean to 1.0 and a tighter std (0.5) to push the optimizer away from 0.
+prior_disc = Normal(1.0, 0.5)
+
+# Prior for Signal Variance
+prior_sig = Normal(0.0, 1.0)
+
+# Apply to Kernel
+# Parameter order for Mat52Ard (dim=2): [log(ℓ_x1), log(ℓ_x2), log(σ_f)]
+priors = [prior_cont, prior_disc, prior_sig]
+
+set_priors!(GMKernel, priors)
+
+gp_template = GPE(
+    X_warm',              # Input data (transponerat för GPE)
+    y_warm,               # Output data
+    MeanConst(0.0),       # Målfunktionens medelvärde (för standardiserad data)
+    GMKernel,            # Kerneln vi byggde ovan (kopieras inuti BO)
+    -1.0                  # Startvärde för logNoise
+)
+
 # ==============================================================================
 # Run BAYESIAN OPTIMIZATION
 # ==============================================================================
-
 
 # IMPORTANT: DiscreteKern=1 makes sure that the last dimension does not rescale.
 warmStart = (X_final, y_final)
 @time gp, X_final, y_final, max_x, max_val, max_obs_x, max_obs_val = BO(
     true_function, modelSettings, opt_settings, warmStart; DiscreteKern=1
 )
+
+# With prior, optimization gets way faster when adding this curvature! 
+warmStart = (X_final, y_final)
+@time gp, X_final, y_final, max_x, max_val, max_obs_x, max_obs_val = BO(
+    true_function, gp_template, modelSettings, optSettings, warmStart; DiscreteKern=1
+)
+
 
 println("\nGlobal Model Max hittat vid: $max_x")
 println("Värde vid max: $(round(max_val, digits=3))")

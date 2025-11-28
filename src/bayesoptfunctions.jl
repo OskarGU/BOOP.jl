@@ -39,7 +39,14 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
         res = if acq_config isa KnowledgeGradientConfig # Use the abstract type
             optimize(objective_to_minimize, -1.0, 1.0, x0, Fminbox(NelderMead()))
         else
-            optimize(objective_to_minimize, -1.0 * ones(d), 1.0 * ones(d), x0, Fminbox(LBFGS()); autodiff = :forward)
+            optimize(objective_to_minimize, 
+         -1.0 * ones(d), 
+         1.0 * ones(d), 
+         x0, 
+         Fminbox(LBFGS()), 
+         # Add options here as the last positional argument
+         Optim.Options(time_limit = 0.5, show_trace = false); 
+         autodiff = :forward)
         end
 
         current_acq_val = -Optim.minimum(res)
@@ -152,7 +159,10 @@ function propose_next(gp::GPE{X,Y,M,K,P}, f_max; n_restarts::Int, acq_config::BO
         if !isempty(cont_dims)
             for x0 in random_starts
                 # Optimera med NelderMead (Robust, inga gradienter)
-                res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(NelderMead()))
+                #res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(NelderMead()))
+                res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(LBFGS()), 
+               Optim.Options(time_limit=0.5); 
+               autodiff = :forward)
 
                 curr_val = -Optim.minimum(res)
                 
@@ -478,10 +488,9 @@ function BO(f, gp_template::GPE, modelSettings, optimizationSettings, warmStart;
     # Work in the scaled space [-1, 1]^d.
     Xscaled = rescale(X, modelSettings.xBounds[1], modelSettings.xBounds[2], integ = DiscreteKern)
 
-    # --- ÄNDRING: Initiera spårning av kernel/noise från mallen ---
     current_kernel = deepcopy(gp_template.kernel)
     current_logNoise = gp_template.logNoise
-    gp = nothing # Platshållare för senaste modellen
+    gp = nothing 
     # -------------------------------------------------------------
 
      for i in 1:optimizationSettings.nIter
@@ -492,13 +501,12 @@ function BO(f, gp_template::GPE, modelSettings, optimizationSettings, warmStart;
          y_scaled = (y .- μ_y) ./ σ_y
          
          # Train the GP on the Standardized y-values
-         # --- ÄNDRING: Bygg GP från mallen och senaste parametrarna ---
+
          gp = GP(Xscaled', y_scaled, gp_template.mean, deepcopy(current_kernel), current_logNoise)
          # -------------------------------------------------------------
          optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, 
-                    options=Optim.Options(iterations=100))
+                    options=Optim.Options(iterations=100, time_limit = 5.0))
      
-        # --- ÄNDRING: Spara de lärda parametrarna till nästa varv ---
         current_kernel = gp.kernel
         current_logNoise = gp.logNoise
         # ------------------------------------------------------------
@@ -540,9 +548,9 @@ function BO(f, gp_template::GPE, modelSettings, optimizationSettings, warmStart;
     y_scaled_final = (y .- μ_y_final) ./ σ_y_final
     
     # --- ÄNDRING: Bygg slutlig modell med de senaste parametrarna ---
-    gp = GP(Xscaled', y_scaled_final, gp_template.mean, deepcopy(current_kernel), current_logNoise)
+    gp = GP(Xscaled', y_scaled_final, gp_template.mean, deepcopy(current_kernel))#, current_logNoise)
     # ---------------------------------------------------------------
-    optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=500))
+    optimize!(gp; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, options=Optim.Options(iterations=500, time_limit = 5.0))
     # (1) Global posterior mean maximum.
     final_posterior_max_result = posteriorMax(gp; n_starts=40)
     objectMaximizer_scaled = final_posterior_max_result.X_max

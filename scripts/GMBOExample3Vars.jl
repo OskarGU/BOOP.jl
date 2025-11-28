@@ -41,7 +41,7 @@ function true_var_proxy(x_vec)
     # Sum of the parts and noise
     true_val = score_z + banana_penalty + decay_centering + zero_decay_penalty
     noise = 0.1 * randn()
-    return true_val + noise
+    return max(true_val + noise, -50.0)
 end
 
 # Same as above but noise-free, for plotting.
@@ -78,24 +78,24 @@ warmStart = (X_warm, y_warm)
 
 # 1. Kernel (3 dimensions: 2 continuous + 1 discrete)
 # We work with a Matérn 5/2 kernel with ARD as a base here.
-startLogℓ = [0.0, 0.0, 1.0] 
+startLogℓ = [-0.5, -0.5, 1.0] 
 startSignalσ² = 1.0 
 baseKernel = Mat52Ard(startLogℓ, log(startSignalσ²)) 
 
 # G-M Kernel: Tells the kernel that the third variable is discrete.
-gm_kernel = BOOP.GarridoMerchanKernel(baseKernel, [3], [z_lo:z_hi])
+GMKernel = BOOP.GarridoMerchanKernel(baseKernel, [3], [z_lo:z_hi])
 
 
 modelSettings = (
     mean = MeanConst(mean(y_warm)),
     kernel = deepcopy(gm_kernel),   
-    logNoise = -2.0,                
+    logNoise = -1.0,                
     
     # Important!: put bounds on the discrete dimensions so that the length scale 
     # is not too short! (< 0.5).
     # Bounds ordning: [ℓx1, ℓx2, ℓz, signalσ²]
-    kernelBounds = [[-3.0, -3.0, 0.5, -5.0], [3.0, 3.0, 4.0, 5.0]], 
-    noiseBounds = [-5.0, 2.0],
+    kernelBounds = [[-2.0, -2.0, 0.5, -2.0], [3.0, 3.0, 4.0, 5.0]], 
+    noiseBounds = [-2.0, 2.0],
     xdim = d,
     
     # Bounds for continuous variables (used by rescale())
@@ -109,6 +109,38 @@ opt_settings = OptimizationSettings(
     acq_config = EIConfig(ξ=.1) 
 )
 
+
+# Priors:
+
+# Prior for Continuous Variable (x1)
+# Range is [-1, 1] (width 2). We want a length scale around 0.5.
+# Normal(0.0, 1.0) => Median length scale exp(0) = 1.0.
+prior_cont = Normal(-0.5, 0.5)
+
+# Prior for Discrete Variable (x2)
+# Step size is 1.0. To avoid the "Independence Trap" (where the GP treats neighbors
+# as unrelated), the length scale MUST be > 1.0.
+# We aim for a length scale around 3.0 (exp(1.1)).
+# We set mean to 1.0 and a tighter std (0.5) to push the optimizer away from 0.
+prior_disc = Normal(1.0, 0.5)
+
+# Prior for Signal Variance
+prior_sig = Normal(0.0, 1.0)
+
+# Apply to Kernel
+# Parameter order for Mat52Ard (dim=2): [log(ℓ_x1), log(ℓ_x2), log(σ_f)]
+priors = [prior_cont, prior_cont, prior_disc, prior_sig]
+
+set_priors!(GMKernel, priors)
+
+gp_template = GPE(
+    X_warm',              # Input data (transponerat för GPE)
+    y_warm,               # Output data
+    MeanConst(mean(y_final)),       # Målfunktionens medelvärde (för standardiserad data)
+    GMKernel,            # Kerneln vi byggde ovan (kopieras inuti BO)
+    -1.0                  # Startvärde för logNoise
+)
+
 # ==============================================================================
 # RUN THE BAYESIAN OPTIMIZATION
 # ==============================================================================
@@ -119,6 +151,13 @@ warmStart = (X_final, y_final)
 #warmStart = (X_warm, y_warm)
 @time gp, X_final, y_final, max_x, max_val, max_obs_x, max_obs_val = BO(
     true_var_proxy, modelSettings, opt_settings, warmStart; DiscreteKern=1
+)
+
+
+# With prior
+warmStart = (X_final, y_final)
+@time gp, X_final, y_final, max_x, max_val, max_obs_x, max_obs_val = BO(
+    true_var_proxy, gp_template, modelSettings, opt_settings, warmStart; DiscreteKern=1
 )
 
 println("\nGlobalt Optimum found:")
