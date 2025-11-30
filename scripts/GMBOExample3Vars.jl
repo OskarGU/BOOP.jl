@@ -41,7 +41,7 @@ function true_var_proxy(x_vec)
     # Sum of the parts and noise
     true_val = score_z + banana_penalty + decay_centering + zero_decay_penalty
     noise = 0.1 * randn()
-    return max(true_val + noise, -50.0)
+    return max(true_val + noise, -90.0)
 end
 
 # Same as above but noise-free, for plotting.
@@ -88,14 +88,14 @@ GMKernel = BOOP.GarridoMerchanKernel(baseKernel, [3], [z_lo:z_hi])
 
 modelSettings = (
     mean = MeanConst(mean(y_warm)),
-    kernel = deepcopy(gm_kernel),   
+    kernel = deepcopy(GMKernel),   
     logNoise = -1.0,                
     
     # Important!: put bounds on the discrete dimensions so that the length scale 
     # is not too short! (< 0.5).
     # Bounds ordning: [ℓx1, ℓx2, ℓz, signalσ²]
-    kernelBounds = [[-2.0, -2.0, 0.5, -2.0], [3.0, 3.0, 4.0, 5.0]], 
-    noiseBounds = [-2.0, 2.0],
+    kernelBounds = [[-2.0, -2.0, 0.5, -2.0], [1., 1., 4.0, 1.]], 
+    noiseBounds = [-3.0, 0.0],
     xdim = d,
     
     # Bounds for continuous variables (used by rescale())
@@ -105,8 +105,8 @@ modelSettings = (
 
 opt_settings = OptimizationSettings(
     nIter = 3,           
-    n_restarts = 15,
-    acq_config = EIConfig(ξ=.1) 
+    n_restarts = 25,
+    acq_config = EIConfig(ξ=.15) 
 )
 
 
@@ -136,7 +136,7 @@ set_priors!(GMKernel, priors)
 gp_template = GPE(
     X_warm',              # Input data (transponerat för GPE)
     y_warm,               # Output data
-    MeanConst(mean(y_final)),       # Målfunktionens medelvärde (för standardiserad data)
+    MeanConst(mean(y_warm)),       # Målfunktionens medelvärde (för standardiserad data)
     GMKernel,            # Kerneln vi byggde ovan (kopieras inuti BO)
     -1.0                  # Startvärde för logNoise
 )
@@ -159,6 +159,7 @@ warmStart = (X_final, y_final)
 @time gp, X_final, y_final, max_x, max_val, max_obs_x, max_obs_val = BO(
     true_var_proxy, gp_template, modelSettings, opt_settings, warmStart; DiscreteKern=1
 )
+
 
 println("\nGlobalt Optimum found:")
 println("  Overall Shrinkage (x1): $(round(max_x[1], digits=3))")
