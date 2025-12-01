@@ -40,7 +40,7 @@ function true_var_proxy(x_vec)
 
     # Sum of the parts and noise
     true_val = score_z + banana_penalty + decay_centering + zero_decay_penalty
-    noise = 0.1 * randn()
+    noise = 2.1 * randn()
     return max(true_val + noise, -90.0)
 end
 
@@ -87,31 +87,24 @@ GMKernel = BOOP.GarridoMerchanKernel(baseKernel, [3], [z_lo:z_hi])
 
 
 modelSettings = (
-    mean = MeanConst(mean(y_warm)),
-    kernel = deepcopy(GMKernel),   
-    logNoise = -1.0,                
-    
     # Important!: put bounds on the discrete dimensions so that the length scale 
     # is not too short! (< 0.5).
     # Bounds ordning: [ℓx1, ℓx2, ℓz, signalσ²]
-    kernelBounds = [[-2.0, -2.0, 0.5, -2.0], [1., 1., 4.0, 1.]], 
-    noiseBounds = [-3.0, 0.0],
-    xdim = d,
-    
+    kernelBounds = [[-2.0, -2.0, -0.5, -2.0], [2., 2., 6.0, 1.5]], 
+    noiseBounds = [-3.0, 0.0],   # If this is excluded, the noise is fixed at logNoise in the GPTemplate.    
     # Bounds for continuous variables (used by rescale())
     xBounds = ([x1_lo, x2_lo], [x1_hi, x2_hi]) 
 )
 
 
 opt_settings = OptimizationSettings(
-    nIter = 3,           
+    nIter = 30,           
     n_restarts = 25,
     acq_config = EIConfig(ξ=.15) 
 )
 
 
 # Priors:
-
 # Prior for Continuous Variable (x1)
 # Range is [-1, 1] (width 2). We want a length scale around 0.5.
 # Normal(0.0, 1.0) => Median length scale exp(0) = 1.0.
@@ -137,8 +130,8 @@ gp_template = GPE(
     X_warm',              # Input data (transponerat för GPE)
     y_warm,               # Output data
     MeanConst(mean(y_warm)),       # Målfunktionens medelvärde (för standardiserad data)
-    GMKernel,            # Kerneln vi byggde ovan (kopieras inuti BO)
-    -1.0                  # Startvärde för logNoise
+    deepcopy(GMKernel),            # Kerneln vi byggde ovan (kopieras inuti BO)
+    -2.0                  # Startvärde för logNoise
 )
 
 # ==============================================================================
@@ -155,6 +148,7 @@ warmStart = (X_final, y_final)
 
 
 # With prior
+hcat(X_final, y_final)
 warmStart = (X_final, y_final)
 @time gp, X_final, y_final, max_x, max_val, max_obs_x, max_obs_val = BO(
     true_var_proxy, gp_template, modelSettings, opt_settings, warmStart; DiscreteKern=1

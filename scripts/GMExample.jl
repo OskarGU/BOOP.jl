@@ -18,14 +18,14 @@ function true_function(x_vec)
     cont_part = sqrt(abs(x_cont))*cos(3 * (x_cont*1.3 - 0.5))
     
     # Some measurement noise
-    noise = 0.25 * randn()
+    noise = 0.5 * randn()
     
     # Scale up a bit.
     return 10.0 * disc_part * cont_part + noise
 end
 
 # No noise version for plotting
-f_true_plot(x, z) = 10.0 * exp(-(z - 7)^2 / 8.0) * sqrt(abs(x))*cos(3 * (x*1.3 - 0.5)) 
+f_true_plot(x, z) = 10.0 * exp(-(round(z) - 7)^2 / 8.0) * sqrt(abs(x))*cos(3 * (x*1.3 - 0.5)) 
 
 # Optimization bounds.
 x_lo, x_hi = -1.0, 1.0
@@ -33,22 +33,24 @@ z_lo, z_hi = 2, 12
 d = 2
 
 # Generate starting values
-N_init = 5
+N_init = 2
 X_warm = zeros(N_init, d)
+#X_warm[1, :] = [-0.95 7.]
+#X_warm[2, :] = [-0.65,5.]
 X_warm[:, 1] = rand(Uniform(x_lo, x_hi), N_init)   
 X_warm[:, 2] = rand(z_lo:z_hi, N_init)              
 y_warm = [true_function(row) for row in eachrow(X_warm)]
 
 warmStart = (X_warm, y_warm)
-
+hcat(X_warm, y_warm)
 # ==============================================================================
 # BO SETTINGS
 # ==============================================================================
 
 # Set up the kernel with Garrido-Merchán adjustments
 # Use Matern52Ard ase base-kernel.
-base_k = Mat52Ard([0.1;0.6], 0.8) 
-GMKernel = BOOP.GarridoMerchanKernel(base_k, [2], [z_lo:z_hi])
+baseKernel = Mat52Ard([0.1;0.6], 0.8) 
+GMKernel = BOOP.GarridoMerchanKernel(baseKernel, [2], [z_lo:z_hi])
 
 
 modelSettings = (
@@ -56,7 +58,7 @@ modelSettings = (
     kernel = deepcopy(GMKernel),   
     logNoise = -2.0,                
     kernelBounds = [[-3.0, 0.5, -2.0], [3.0, 3.0, 5.0]], 
-    noiseBounds = [-5.0, 2.0],
+    noiseBounds = [-3.0, 2.0],
     xdim = d,
     # Bounds for rescaleing.
     xBounds = ([x_lo, x_hi]) 
@@ -65,7 +67,7 @@ modelSettings = (
 optSettings = OptimizationSettings(
     nIter = 3,          
     n_restarts = 10,
-    acq_config = EIConfig(ξ=0.1) 
+    acq_config = EIConfig(ξ=0.31) 
     #acq_config = UCBConfig(κ=2.5)
     #acq_config = KGHConfig(n_z=50)
 )
@@ -199,11 +201,11 @@ final_plot = plot(p1, p2, slice_plots..., layout=l, size=(1200, 1000));
 z_plot_grid = range(0, 13, length=500)
 
 # Select 4 different fixed x-values to plot the steps at.
-x_fixed_values = [-0.6, 0.9, 0.5, 0.9]
+x_fixed_values = [-0.6, 0.9, 0.5]
 
 # Layout 2x2
-plot_layout = @layout [a b; c d]
-p_steps = plot(layout=plot_layout, size=(1000, 800), legend=:topleft);
+plot_layout = @layout [a b c]
+pSteps = plot(layout=plot_layout, size=(1000, 800), legend=:topleft);
 
 for (idx, x_val) in enumerate(x_fixed_values)
     
@@ -221,7 +223,7 @@ for (idx, x_val) in enumerate(x_fixed_values)
     upper = μ .+ 2 .* σ
 
     # Plot GP (staircases)
-    plot!(p_steps, z_plot_grid, μ, 
+    plot!(pSteps, z_plot_grid, μ, 
           ribbon=(μ .- lower, upper .- μ),
           fillalpha=0.2,
           lw=2,
@@ -234,8 +236,8 @@ for (idx, x_val) in enumerate(x_fixed_values)
     )
 
     # Plot truth.
-    y_true = [true_function([x_val, z]) for z in z_plot_grid]
-    plot!(p_steps, z_plot_grid, y_true, 
+    y_true = [f_true_plot(x_val, z) for z in z_plot_grid]
+    plot!(pSteps, z_plot_grid, y_true, 
           label="Sann funktion", 
           linestyle=:dash, 
           color=:black, 
@@ -247,7 +249,7 @@ for (idx, x_val) in enumerate(x_fixed_values)
     mask = abs.(X_final'[1, :] .- x_val) .< 0.05
     
     if any(mask)
-        scatter!(p_steps, X_final'[2, mask], y_final[mask],
+        scatter!(pSteps, X_final'[2, mask], y_final[mask],
                  label="Data (nära x=$(x_val))",
                  markercolor=:red,
                  markersize=5,
@@ -259,4 +261,4 @@ end;
 
 pHeat = plot(p1, p2);
 pSlice = plot(slice_plots..., layout=(1,3));
-plot(pHeat,pSlice,p3,layout=(3,1), size=(1500,1200))
+plot(pHeat,pSlice,pSteps,layout=(3,1), size=(1500,1200))
