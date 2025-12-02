@@ -40,7 +40,7 @@ function true_var_proxy(x_vec)
 
     # Sum of the parts and noise
     true_val = score_z + banana_penalty + decay_centering + zero_decay_penalty
-    noise = 2.1 * randn()
+    noise = 1.1 * randn()
     return max(true_val + noise, -90.0)
 end
 
@@ -98,7 +98,7 @@ modelSettings = (
 
 
 opt_settings = OptimizationSettings(
-    nIter = 30,           
+    nIter = 10,           
     n_restarts = 25,
     acq_config = EIConfig(ξ=.15) 
 )
@@ -139,12 +139,6 @@ gp_template = GPE(
 # ==============================================================================
 
 # DiscreteKern=1 means that last dimension is discrete.
-# We use the warm start data defined above.
-warmStart = (X_final, y_final)
-#warmStart = (X_warm, y_warm)
-@time gp, X_final, y_final, max_x, max_val, max_obs_x, max_obs_val = BO(
-    true_var_proxy, modelSettings, opt_settings, warmStart; DiscreteKern=1
-)
 
 
 # With prior

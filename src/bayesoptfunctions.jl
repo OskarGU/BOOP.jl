@@ -264,13 +264,34 @@ julia> rescale(X, lo, hi)
 -1.0 -1.0
 ```
 """
-function rescale(X, lo, hi; integ=0)
-    # X is n×d matrix, lo and hi are length-d vectors
-    if integ == 0
-        return 2 .* (X .- lo') ./ (hi' .- lo') .- 1
-    else
-        return hcat(2 .* (X[:,1:end-integ] .- lo') ./ (hi' .- lo') .- 1, [round.(X[:,end]);])
+#function rescale(X, lo, hi; integ=0)
+#    # X is n×d matrix, lo and hi are length-d vectors
+#    if integ == 0
+#        return 2 .* (X .- lo') ./ (hi' .- lo') .- 1
+#    else
+#        return hcat(2 .* (X[:,1:end-integ] .- lo') ./ (hi' .- lo') .- 1, [round.(X[:,end]);])
+#    end
+#end
+
+# More general to allow multiple discrete dimensions anywhere in the input space.
+function rescale(X, lo, hi; integ=Int[])
+    # 1. Skapa kopia och identifiera dimensioner
+    X_scaled = copy(X)
+    d = size(X, 2)
+    
+    # Hantera om integ är en siffra (gammalt sätt) eller vektor (nytt sätt)
+    disc_indices = (integ isa Int && integ > 0) ? ((d - integ + 1):d) : (integ isa Int ? Int[] : integ)
+    cont_indices = setdiff(1:d, disc_indices)
+    
+    # 2. Skala BARA de kontinuerliga till [-1, 1]
+    if !isempty(cont_indices)
+        lo_mat = reshape(lo[cont_indices], 1, :)
+        hi_mat = reshape(hi[cont_indices], 1, :)
+        X_scaled[:, cont_indices] .= 2 .* (X[:, cont_indices] .- lo_mat) ./ (hi_mat .- lo_mat) .- 1
     end
+    
+    # 3. De diskreta rör vi inte (De är redan 0, 1, 2... vilket är bra för GM)
+    return X_scaled
 end
 
 """
@@ -299,14 +320,37 @@ julia> inv_rescale(X_scaled, lo, hi)
  0.0  10.0
 ```
 """ 
-function inv_rescale(XScaled, lo, hi; integ = 0) 
-    if integ == 0
-        ((XScaled .+ 1) ./ 2) .* (hi' .- lo') .+ lo'
-    else
-        hcat(((XScaled[:,1:end-integ] .+ 1) ./ 2) .* (hi' .- lo') .+ lo', [round.(XScaled[:,end]);])
-    end
-end
+#function inv_rescale(XScaled, lo, hi; integ = 0) 
+#    if integ == 0
+#        ((XScaled .+ 1) ./ 2) .* (hi' .- lo') .+ lo'
+#    else
+#        hcat(((XScaled[:,1:end-integ] .+ 1) ./ 2) .* (hi' .- lo') .+ lo', [round.(XScaled[:,end]);])
+#    end
+#end
 
+
+# More general to allow multiple discrete dimensions anywhere in the input space.
+function inv_rescale(X_scaled, lo, hi; integ=Int[])
+    X_orig = copy(X_scaled)
+    d = size(X_scaled, 2)
+    
+    disc_indices = (integ isa Int && integ > 0) ? ((d - integ + 1):d) : (integ isa Int ? Int[] : integ)
+    cont_indices = setdiff(1:d, disc_indices)
+    
+    # 1. Skala tillbaka de kontinuerliga
+    if !isempty(cont_indices)
+        lo_mat = reshape(lo[cont_indices], 1, :)
+        hi_mat = reshape(hi[cont_indices], 1, :)
+        X_orig[:, cont_indices] .= (X_scaled[:, cont_indices] .+ 1) ./ 2 .* (hi_mat .- lo_mat) .+ lo_mat
+    end
+    
+    # 2. Avrunda de diskreta (Säkerhetsåtgärd)
+    if !isempty(disc_indices)
+        X_orig[:, disc_indices] .= round.(X_orig[:, disc_indices])
+    end
+    
+    return X_orig
+end
 
 
 
@@ -441,7 +485,6 @@ function BO(f, gpTemplate::GPE, modelSettings, optimizationSettings, warmStart; 
     # -------------------------------------------------------------
 
     for i in 1:optimizationSettings.nIter
-        println("\n=== Iteration $i ===")
         
         # 1. Standardize Data
         μ_y = mean(y)
@@ -482,7 +525,8 @@ function BO(f, gpTemplate::GPE, modelSettings, optimizationSettings, warmStart; 
 
         currentKernel = gp.kernel
         currentMean = gp.mean
-        currentLogNoise = max(gp.logNoise.value, -2.) # max() to avoid numerical issues.     
+        currentLogNoise = gp.logNoise.value
+       
 
         #t_acq = time() # debugg-timer
 
@@ -524,7 +568,6 @@ function BO(f, gpTemplate::GPE, modelSettings, optimizationSettings, warmStart; 
         Xscaled = vcat(Xscaled, xNextScaled')
         y = vcat(y, y_next)
         
-        println("  >> Resultat: y = $(round(y_next, digits=3))")
     end
 
     println("\n=== Finalizing Model ===")
