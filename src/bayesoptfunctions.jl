@@ -101,10 +101,10 @@ function propose_next(gp::GPE{X,Y,M,K,P}, f_max; n_restarts::Int, acq_config::BO
         if !isempty(cont_dims)
             for x0 in random_starts
                 # Optimera med NelderMead (Robust, inga gradienter)
-                #res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(NelderMead()))
-                res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(LBFGS()), 
-               Optim.Options(time_limit=0.5); 
-               autodiff = :forward)
+                res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(NelderMead()))
+                #res = optimize(sub_objective, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(LBFGS()), 
+               #Optim.Options(time_limit=0.5); 
+               #autodiff = :forward)
 
                 curr_val = -Optim.minimum(res)
                 
@@ -290,7 +290,6 @@ function rescale(X, lo, hi; integ=Int[])
         X_scaled[:, cont_indices] .= 2 .* (X[:, cont_indices] .- lo_mat) ./ (hi_mat .- lo_mat) .- 1
     end
     
-    # 3. De diskreta rör vi inte (De är redan 0, 1, 2... vilket är bra för GM)
     return X_scaled
 end
 
@@ -472,7 +471,6 @@ Performs a full Bayesian Optimization run using a GP template.
 
 # With debuggtimer.
 function BO(f, gpTemplate::GPE, modelSettings, optimizationSettings, warmStart; DiscreteKern=0)
-    println("--- Startar Bayesiansk Optimering ---")
     
     X, y = warmStart
     # Work in the scaled space [-1, 1]^d.
@@ -484,7 +482,7 @@ function BO(f, gpTemplate::GPE, modelSettings, optimizationSettings, warmStart; 
     gp = nothing 
     # -------------------------------------------------------------
 
-    for i in 1:optimizationSettings.nIter
+    @showprogress "Optimizing ..." for i in 1:optimizationSettings.nIter
         
         # 1. Standardize Data
         μ_y = mean(y)

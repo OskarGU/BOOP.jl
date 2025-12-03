@@ -22,7 +22,7 @@ function true_function_2D_discrete(x_vec)
     
     # Peak at (3, 9)
     # Using Gaussian-like bumps on the discrete grid
-    val = 5.0 * exp(-(z1 - 4)^2 / 1.5 - (z2 - 7)^2 / 4.0)
+    val = 5.0 * exp(-(z1 - 4)^2 / 2.5 - (z2 - 7)^2 / 4.0) + 4.0 * exp(-(z1 - 8)^2 / 1.5 - (z2 - 15)^2 / 4.0)
     
     # Add some noise
     noise = 0.5 * randn()
@@ -30,7 +30,7 @@ function true_function_2D_discrete(x_vec)
 end
 
 # Noiseless version for plotting
-f_true_plot(z1, z2) = 5.0 * exp(-(round(z1) - 4)^2 / 1.5 - (round(z2) - 7)^2 / 4.0)
+f_true_plot(z1, z2) = 5.0 * exp(-(round(z1) - 4)^2 / 2.5 - (round(z2) - 7)^2 / 4.0) +4.0 * exp(-(z1 - 8)^2 / 1.5 - (z2 - 15)^2 / 4.0)
 
 # Bounds
 x_lo = [minimum(r1), minimum(r2)] # [1.0, 7.0]
@@ -87,7 +87,7 @@ modelSettings = (
 optSettings = OptimizationSettings(
     nIter = 2,          
     n_restarts = 5,
-    acq_config = EIConfig(ξ=0.1) 
+    acq_config = EIConfig(ξ=0.2) 
 )
 
 # ==============================================================================
@@ -167,7 +167,7 @@ scatter!(p2, X_final[:,1], X_final[:,2], label="Evalueringar", mc=:red, ms=6)
 # --- 2. Continuous "Staircase" Plot ---
 # We slice through the space to see the GM behavior.
 # Fix z2 = 9 (Optimal row), vary z1 continuously from 0.5 to 4.5
-z1_cont = range(0.5, 4.5, length=300)
+z1_cont = range(2.5, 9.5, length=300)
 z2_fixed = 7.0
 
 y_step_pred = zeros(length(z1_cont))
@@ -180,8 +180,10 @@ for (i, z1) in enumerate(z1_cont)
     y_step_std[i] = sqrt(max(σ2[1], 0)) * σ_y
 end
 
+
+
 p3 = plot(z1_cont, y_step_pred, 
-    title="Snitt vid z2=9 (Visar Trappsteg)", 
+    title="Snitt vid z2=7 (Visar Trappsteg)", 
     xlabel="z1 (Kontinuerlig vy)", ylabel="Output",
     lw=2, color=:blue, label="GP Mean",
     ribbon=(2*y_step_std, 2*y_step_std), fillalpha=0.2

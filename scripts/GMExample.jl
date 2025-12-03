@@ -53,23 +53,18 @@ baseKernel = Mat52Ard([0.1;0.6], 0.8)
 GMKernel = BOOP.GarridoMerchanKernel(baseKernel, [2], [z_lo:z_hi])
 
 
-modelSettings = (
-    mean = MeanConst(mean(y_warm)),
-    kernel = deepcopy(GMKernel),   
-    logNoise = -2.0,                
+modelSettings = (        
     kernelBounds = [[-3.0, 0.5, -2.0], [3.0, 3.0, 5.0]], 
     noiseBounds = [-3.0, 2.0],
-    xdim = d,
     # Bounds for rescaleing.
-    xBounds = ([x_lo, x_hi]) 
+    xBounds = ([[x_lo], [x_hi]]) 
 )
 
 optSettings = OptimizationSettings(
-    nIter = 3,          
+    nIter = 2,          
     n_restarts = 10,
-    acq_config = EIConfig(ξ=0.31) 
+    acq_config = EIConfig(ξ=0.11) 
     #acq_config = UCBConfig(κ=2.5)
-    #acq_config = KGHConfig(n_z=50)
 )
 
 
@@ -110,16 +105,10 @@ gp_template = GPE(
     GMKernel,            # Kerneln vi byggde ovan (kopieras inuti BO)
     -1.0                  # Startvärde för logNoise
 )
-
 # ==============================================================================
 # Run BAYESIAN OPTIMIZATION
 # ==============================================================================
 
-# IMPORTANT: DiscreteKern=1 makes sure that the last dimension does not rescale.
-warmStart = (X_final, y_final)
-@time gp, X_final, y_final, max_x, max_val, max_obs_x, max_obs_val = BO(
-    true_function, modelSettings, opt_settings, warmStart; DiscreteKern=1
-)
 
 # With prior, optimization gets way faster when adding this curvature! 
 warmStart = (X_final, y_final)
@@ -211,7 +200,7 @@ for (idx, x_val) in enumerate(x_fixed_values)
     
     # Prepare prediction inputs
     X_test_slice = zeros(2, length(z_plot_grid))
-    X_test_slice[1, :] .= BOOP.rescale(x_val, [-1.], [1.]; integ=0)
+    X_test_slice[1, :] .= rescale([x_val], [-1.], [1.]; integ=[0])
     X_test_slice[2, :] .= z_plot_grid
 
     # Predict
@@ -261,4 +250,157 @@ end;
 
 pHeat = plot(p1, p2);
 pSlice = plot(slice_plots..., layout=(1,3));
-plot(pHeat,pSlice,pSteps,layout=(3,1), size=(1500,1200))
+len=(length(X_final[:,1]))
+plot(pHeat,pSlice,pSteps,layout=(3,1), size=(1500,1200),plot_title="Iteration: $len")
+
+
+
+
+
+
+
+
+###############################
+# Skapa och spara en animation av optimeringsprocessen
+###############################
+using Plots, Statistics, Printf
+
+# ==============================================================================
+# 1. SETUP
+# ==============================================================================
+warmStart = (X_warm, y_warm) # Startvärden från tidigare
+# Initiera warmStart om det behövs
+if !@isdefined(warmStart)
+    println("Initierar warmStart...")
+    N_init = 5
+    X_init = zeros(N_init, 2)
+    X_init[:, 1] = rand(x_lo[1]:0.01:x_hi[1], N_init)
+    X_init[:, 2] = rand(z_lo:z_hi, N_init)
+    y_init = [true_function(row) for row in eachrow(X_init)]
+    warmStart = (X_init, y_init)
+end
+
+# Settings för ETT steg i taget
+step_opt_settings = OptimizationSettings(
+    nIter = 1,
+    n_restarts = 5,
+    acq_config = EIConfig(ξ=0.1) 
+)
+
+frames = 20
+
+# ==============================================================================
+# 2. ANIMATIONSLOOP
+# ==============================================================================
+anim = @animate for iter in 1:frames
+    println("Genererar frame $iter / $frames ...")
+
+    # --- A. KÖR OPTIMERING (1 STEG) ---
+    global gp, X_final, y_final, max_x, max_val, _, _ = BO(
+        true_function, gp_template, modelSettings, step_opt_settings, warmStart; 
+        DiscreteKern=[2] 
+    )
+    
+    global warmStart = (X_final, y_final)
+    μ_y_local, σ_y_local = mean(y_final), std(y_final)
+
+    # --- B. SKAPA PLOTTARNA ---
+
+    # 1. Heatmaps
+    Z_model = zeros(length(zs), length(xs))
+    for (r, z) in enumerate(zs), (c, x) in enumerate(xs)
+        x_sc = 2 * (x - x_lo) / (x_hi - x_lo) - 1
+        pt = reshape([x_sc, Float64(z)], 2, 1) 
+        μ_sc, _ = predict_f(gp, pt)
+        Z_model[r, c] = μ_sc[1] * σ_y_local + μ_y_local
+    end
+
+    p1 = heatmap(xs, zs, Z_true, title="Truth", xlabel="x", ylabel="z", c=:viridis)
+    p2 = heatmap(xs, zs, Z_model, title="GP Model", xlabel="x", ylabel="z", c=:viridis)
+    scatter!(p2, X_final[:,1], X_final[:,2], label="", mc=:red, ms=5, ma=0.8)
+    pHeat = plot(p1, p2, layout=(1,2), size=(800, 300))
+
+    # 2. Slice Plots (Z-snitt)
+    slice_plots_vec = []
+    for z_val in [5, 7, 8]
+        y_true_slice = [f_true_plot(x, z_val) for x in xs]
+        y_pred_slice = zeros(length(xs))
+        sig_pred_slice = zeros(length(xs))
+        
+        for (k, x) in enumerate(xs)
+            x_sc = 2 * (x - x_lo) / (x_hi - x_lo) - 1
+            pt = reshape([x_sc, Float64(z_val)], 2, 1)
+            μ, σ2 = predict_f(gp, pt)
+            y_pred_slice[k] = μ[1] * σ_y_local + μ_y_local
+            sig_pred_slice[k] = sqrt(max(σ2[1], 0)) * σ_y_local
+        end
+        
+        p = plot(xs, y_true_slice, label="Sanning", lw=1.5, lc=:black, ls=:dash, title="z = $z_val", legend=false)
+        plot!(p, xs, y_pred_slice, label="GP", lw=2, lc=:blue, ribbon=(2*sig_pred_slice, 2*sig_pred_slice), fillalpha=0.2, fc=:blue)
+        
+        mask = (round.(X_final[:, 2]) .== z_val)
+        if any(mask)
+            scatter!(p, X_final[mask, 1], y_final[mask], mc=:red, ms=6)
+        end
+        push!(slice_plots_vec, p)
+    end
+    pSlice = plot(slice_plots_vec..., layout=(1,3))
+
+    # 3. STEP PLOTS (Här är färgfixen!)
+    z_cont_grid = range(z_lo, z_hi, length=400)
+    x_fixed_vals = [-0.6, 0.5, 0.6] 
+    step_plots_vec = []
+
+    for (k, x_fix) in enumerate(x_fixed_vals)
+        y_true_step = [f_true_plot(x_fix, z) for z in z_cont_grid]
+        y_pred_step = zeros(length(z_cont_grid))
+        sig_pred_step = zeros(length(z_cont_grid))
+        
+        x_sc = 2 * (x_fix - x_lo) / (x_hi - x_lo) - 1
+        
+        for (k, z) in enumerate(z_cont_grid)
+            pt = reshape([x_sc, z], 2, 1)
+            μ, σ2 = predict_f(gp, pt)
+            y_pred_step[k] = μ[1] * σ_y_local + μ_y_local
+            sig_pred_step[k] = sqrt(max(σ2[1], 0)) * σ_y_local
+        end
+        
+        # --- PLOTTNING MED RÄTT FÄRGER ---
+        p = plot(z_cont_grid, y_pred_step, 
+            title="x = $x_fix", xlabel="z", legend=false, 
+            lw=2, lc=k,                 # Blå Linje
+            ribbon=(2*sig_pred_step, 2*sig_pred_step), # Osäkerhetsband
+            fillalpha=0.2, fc=k         # Ljusblå fyllning
+        )
+        
+        # Sanningen (Svart streckad)
+        plot!(p, z_cont_grid, y_true_step, lc=:black)
+        
+        # Röda Prickar (Data nära detta x)
+        mask_x = abs.(X_final[:, 1] .- x_fix) .< 0.1
+        if any(mask_x)
+            scatter!(p, X_final[mask_x, 2], y_final[mask_x], mc=:red, ms=5)
+        end
+        push!(step_plots_vec, p)
+    end
+    
+    pSteps = plot(step_plots_vec..., layout=(1,3))
+
+    # 4. SLUTMONTERING
+    N_total = size(X_final, 1)
+    
+    # Använd layout med korrekta höjder (som summerar till 1.0)
+    final_plot = plot(pHeat, pSlice, pSteps, 
+        layout = grid(3, 1, heights=[0.33, 0.33, 0.34]),
+        size = (1200, 1200),
+        plot_title = "GM-BO Optization: Iteration $iter (Total $N_total evaluations)",
+        plot_titlefontsize = 16,
+        left_margin = 5Plots.mm
+    )
+    
+    final_plot
+end
+
+# SPARA
+gg = gif(anim, "Full_GM_Animation_Blue.gif", fps=1)
+pwd()
