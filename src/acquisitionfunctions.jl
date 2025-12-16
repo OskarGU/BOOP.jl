@@ -202,8 +202,9 @@ function multi_start_minimize(f, lower, upper; n_starts=20)
          lower = [lower]
          upper = [upper]
      end
+
      dim = length(lower)
-     starts = [lower .+ (upper .- lower) .* ((i .+ 0.5) ./ n_starts) for i in 0:(n_starts - 1)]
+     starts = [lower .+ rand(T, dim) .* (upper .- lower) for _ in 1:n_starts]
 
      best_min = Inf
      d=length(lower)

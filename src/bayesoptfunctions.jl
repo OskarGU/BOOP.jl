@@ -51,11 +51,10 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
          #autodiff = :forward
         )
         end
-
         current_acq_val = -Optim.minimum(res)
         if current_acq_val > best_acq_val
             best_acq_val = current_acq_val
-            best_x = Optim.minimizer(res)
+            best_x = clamp.(Optim.minimizer(res), -1, 1) # Make sure NelderMead doesn't return >1 or <-1.
         end
     end
     return best_x
