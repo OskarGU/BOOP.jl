@@ -33,7 +33,7 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
     
     # Dispatch to the correct helper to get the objective function
     baseObjective = _get_objective(gp, f_max, acq_config) 
-    objective_to_minimize = x -> baseObjective(x) * prod(1.0 .- x.^8)
+    objective_to_minimize = x -> baseObjective(x) * prod(1.0 .- x.^20)
     #starts =  [-ones(d) .+ (ones(d) .- -ones(d)) .* ((i .+ 0.5) ./ n_restarts) for i in 0:(n_restarts - 1)]
     starts = [2 .* rand(d) .- 1 for _ in 1:n_restarts]
     for i in 1:n_restarts
