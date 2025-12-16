@@ -211,10 +211,10 @@ function multi_start_minimize(f, lower, upper; n_starts=20)
 
      for x0 in starts
          #res = optimize(f, lower, upper, x0, Fminbox(BFGS()))
-         #res = optimize(f, lower, upper, x0, Fminbox(NelderMead()))
-         res = optimize(f, lower, upper, x0, Fminbox(LBFGS()),
-                       Optim.Options(iterations=100); # Add options if needed
-                       autodiff = :forward)
+         res = optimize(f, lower, upper, x0, Fminbox(NelderMead()))
+        # res = optimize(f, lower, upper, x0, Fminbox(LBFGS()),
+        #               Optim.Options(iterations=100); # Add options if needed
+        #               autodiff = :forward)
 
          if Optim.minimum(res) < best_min
             best_min = Optim.minimum(res)
