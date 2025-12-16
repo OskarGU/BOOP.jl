@@ -36,7 +36,7 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
     objective_to_minimize = x -> baseObjective(x) * prod(1.0 .- x.^20)
     
     if rand() < 0.1
-        objective_to_minimize = baseObjective(x)
+        objective_to_minimize(x) = baseObjective(x)
     end
 
     #starts =  [-ones(d) .+ (ones(d) .- -ones(d)) .* ((i .+ 0.5) ./ n_restarts) for i in 0:(n_restarts - 1)]
