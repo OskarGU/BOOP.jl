@@ -12,10 +12,10 @@ function gaussian_mixture_pdf_3d(x::Vector{Float64})
     p1 = MvNormal(μ1, Σ1)
     p2 = MvNormal(μ2, Σ2)
     w1, w2 = 0.5, 0.5
-    return 20 * (w1 * pdf(p1, x) + w2 * pdf(p2, x))
+    return 150 * (w1 * pdf(p1, x) + w2 * pdf(p2, x))
 end
 
-f(x) = gaussian_mixture_pdf_3d(x) + 0.0005randn()
+f(x) = gaussian_mixture_pdf_3d(x) + 0.05randn()
 
 # Setup
 d = 3
@@ -29,10 +29,10 @@ yWarm = [f(vec(XWarm[i, :])) for i in 1:size(XWarm, 1)]
 
 # GP model settings
 mean1 = MeanConst(0.0)
-kernel1 = Mat52Ard(1. * ones(d), 1.0)
+kernel1 = SEArd(1. * ones(d), 1.0)
 logNoise1 = log(1e-1)
-KB = [[-2.0, -2.0, -2.0, -2.0], [2.5, 2.5, 2.5, 3.0]]
-NB = [-4.0, 1.0]
+KB = [[-4.0, -4.0, -4.0, -4.0], [2.5, 2.5, 2.5, 3.0]]
+NB = [-5.0, 1.0]
 
 modelSettings = (
     kernelBounds=KB,
@@ -43,7 +43,7 @@ modelSettings = (
 optSettings = OptimizationSettings(
     nIter = 5,           
     n_restarts = 25,
-    acq_config = EIConfig(ξ=.15) 
+    acq_config = EIConfig(ξ=.5) 
 )
 
 
@@ -51,10 +51,10 @@ optSettings = OptimizationSettings(
 # Prior for Continuous Variable (x1)
 # Range is [-1, 1] (width 2). We want a length scale around 0.5.
 # Normal(0.0, 1.0) => Median length scale exp(0) = 1.0.
-prior_cont = Normal(-0.5, 0.5)
+prior_cont = Normal(-.5, 0.25)
 
 # Prior for Signal Variance
-prior_sig = Normal(0.0, 1.0)
+prior_sig = Normal(0.0, 0.5)
 
 # Apply to Kernel
 # Parameter order for Mat52Ard (dim=2): [log(ℓ_x1), log(ℓ_x2), log(σ_f)]

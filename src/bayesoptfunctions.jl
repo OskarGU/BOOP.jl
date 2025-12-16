@@ -534,10 +534,13 @@ function BO(f, gpTemplate::GPE, modelSettings, optimizationSettings, warmStart; 
         # Stänga av optiomering av noise ger bättre speed.
         #optimize!(gp; kernbounds = modelSettings.kernelBounds, noise=false, 
         #          options=Optim.Options(iterations=100, time_limit = 5.0))
+        # We have a trafe-off here: optimizing with LBFGS is faster but sometimes less stable than NelderMead since
+        # Gradients has to be computed. NelderMead does not work with boubnds though. 
+        # "LineSearches.BackTracking()" makes LBFGS more stupid but more stable...
         optimize!(gp; 
             kernbounds = modelSettings.kernelBounds, 
             noisebounds = modelSettings.noiseBounds,
-            method = NelderMead(),     
+            method = NelderMead(),
             options = Optim.Options(iterations=500, time_limit = 4.0)
         )
         
@@ -614,8 +617,10 @@ function BO(f, gpTemplate::GPE, modelSettings, optimizationSettings, warmStart; 
     end
 
     gpOut = GP(Xscaled', yScaledFinal, currentMean, deepcopy(currentKernel), safeNoise)
-    optimize!(gpOut; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds, method = NelderMead(),
-    options=Optim.Options(iterations=500, time_limit = 5.0))
+    optimize!(gpOut; kernbounds = modelSettings.kernelBounds, noisebounds = modelSettings.noiseBounds,
+              method = NelderMead(),    
+              options=Optim.Options(iterations=500, time_limit = 5.0)
+              )
     
     #println("  [TIMER] Final GP Opt:   $(round(time() - t_final_gp, digits=4)) s") # debugg-timer
     # -----------------------------

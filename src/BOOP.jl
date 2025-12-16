@@ -2,7 +2,7 @@ module BOOP
 
 # Using other packages
 using LinearAlgebra, Distributions, Random, Statistics, Optim, Plots, SpecialFunctions, StatsBase
-using GaussianProcesses, ForwardDiff, LatinHypercubeSampling, ProgressMeter
+using GaussianProcesses, ForwardDiff, LatinHypercubeSampling, ProgressMeter, LineSearches
 
 # Write your package code here.
 
