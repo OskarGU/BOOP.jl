@@ -44,10 +44,12 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
          -1.0 * ones(d), 
          1.0 * ones(d), 
          x0, 
-         Fminbox(LBFGS()), 
+         #Fminbox(LBFGS()),
+         Fminbox(NelderMead()), 
          # Add options here as the last positional argument
          Optim.Options(time_limit = 0.5, show_trace = false); 
-         autodiff = :forward)
+         #autodiff = :forward
+        )
         end
 
         current_acq_val = -Optim.minimum(res)
