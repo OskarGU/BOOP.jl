@@ -29,8 +29,11 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
     best_acq_val = -Inf
     best_x = zeros(d)
 
+    
+    
     # Dispatch to the correct helper to get the objective function
-    objective_to_minimize = _get_objective(gp, f_max, acq_config)
+    baseObjective = _get_objective(gp, f_max, acq_config) 
+    objective_to_minimize = x -> baseObjective(x) * prod(1.0 .- x.^8)
     #starts =  [-ones(d) .+ (ones(d) .- -ones(d)) .* ((i .+ 0.5) ./ n_restarts) for i in 0:(n_restarts - 1)]
     starts = [2 .* rand(d) .- 1 for _ in 1:n_restarts]
     for i in 1:n_restarts
@@ -54,7 +57,7 @@ function propose_next(gp, f_max; n_restarts::Int, acq_config::AcquisitionConfig)
         current_acq_val = -Optim.minimum(res)
         if current_acq_val > best_acq_val
             best_acq_val = current_acq_val
-            best_x = clamp.(Optim.minimizer(res), -1, 1) # Make sure NelderMead doesn't return >1 or <-1.
+            best_x = clamp.(Optim.minimizer(res), -1, 1) # Make sure NelderMead doesn't return >1 or <-1
         end
     end
     return best_x
