@@ -293,6 +293,18 @@ function rescale(X, lo, hi; integ=Int[])
     return X_scaled
 end
 
+# Dispatch for single vector input
+function rescale(X::AbstractVector, lo, hi; kwargs...)
+    # X to matrix (column)
+    X_mat = reshape(X, :, 1)
+
+    # Make sure lo and hi are vectors
+    lo_vec = (lo isa Number) ? [lo] : lo
+    hi_vec = (hi isa Number) ? [hi] : hi
+
+    return rescale(X_mat, lo_vec, hi_vec; kwargs...)
+end
+
 """
     inv_rescale(X_scaled, lo, hi; integ = 0)
 
@@ -350,6 +362,18 @@ function inv_rescale(X_scaled, lo, hi; integ=Int[])
     
     return X_orig
 end
+
+# Dispatch for flexible use 
+function invRescale(xScaled::AbstractVector, lo, hi; kwargs...)
+    return invRescale(reshape(xScaled, :, 1), lo, hi; kwargs...)
+end
+
+# CASE 3: Scalar Input (e.g. invRescale(0.5, ...))
+# Wraps the single number in a vector and passes to Case 2.
+function invRescale(xScaled::Number, lo, hi; kwargs...)
+    return invRescale([xScaled], lo, hi; kwargs...)
+end
+
 
 
 

@@ -6,10 +6,6 @@ using GaussianProcesses
 using BOOP
 #using UniformScaling # Needed for some covariance matrix definitions
 
-# Assuming your module is loaded, e.g.:
-# include("src/MyBayesianOpt.jl")
-# using .MyBayesianOpt
-
 # --- 1. Define the Problem ---
 # Set random seed for reproducibility
 Random.seed!(123)
@@ -19,12 +15,12 @@ function gaussian_mixture_pdf(x::Vector{Float64})
     μ1 = [-2.0, -2.0]
     Σ1 = [2.0 1.5; 1.5 2.0]
     μ2 = [2.0, 2.0]
-    Σ2 = [2.0 -1.7; -1.7 2.0]
+    Σ2 = [3.0 -1.7; -1.7 3.0]
     p1 = MvNormal(μ1, Σ1)
     p2 = MvNormal(μ2, Σ2)
-    w1, w2 = 0.5, 0.5
+    w1, w2 = 0.5, 0.85
     # Scaled by 20 to make the peaks more pronounced
-    return 20 * (w1 * pdf(p1, x) + w2 * pdf(p2, x))
+    return 30 * (w1 * pdf(p1, x) + w2 * pdf(p2, x))
 end
 
 # Noisy version of the function
@@ -62,7 +58,7 @@ modelSettings = (
 opt_settings_ei = OptimizationSettings(
     nIter = 3,
     n_restarts = 30,
-    acq_config = EIConfig(ξ=0.3)
+    acq_config = EIConfig(ξ=0.1)
 )
 
 # Example B: Upper Confidence Bound
@@ -109,6 +105,34 @@ chosen_settings = opt_settings_kgq
 # Choose ONE of the settings from above to run
 chosen_settings = opt_settings_ei
 
+
+# Want prior?
+baseKernel = Mat52Ard(log(2.0) * ones(d), 0.0)
+prior_cont = Normal(-0.5, 0.5)
+
+# Prior for Signal Variance
+prior_sig = Normal(0.0, 1.0)
+
+# Apply to Kernel
+# Parameter order for Mat52Ard (dim=2): [log(ℓ_x1), log(ℓ_x2), log(σ_f)]
+priors = [prior_cont, prior_cont, prior_sig]
+
+set_priors!(baseKernel, priors)
+
+gp_template = GPE(
+    X_warm',              # Input data (transponerat för GPE)
+    y_warm,               # Output data
+    MeanConst(mean(y_warm)),       # Målfunktionens medelvärde (för standardiserad data)
+    baseKernel,            # Kerneln vi byggde ovan (kopieras inuti BO)
+    -1.0                  # Startvärde för logNoise
+)
+
+modelSettings2 = (
+    kernelBounds = [[-3., -3., -5.], [log(3.5), log(3.5), 2.]],
+    noiseBounds = [-4., 1.1],
+    xBounds = bounds
+)
+
 println("Running Bayesian Optimization with $(typeof(chosen_settings.acq_config))...")
 warmStart = (X_warm, y_warm)
 
@@ -116,6 +140,13 @@ warmStart = (X_final, y_final)
 # Note: The BO function returns maximizers, not minimizers
 @time gp_final, X_final, y_final, maximizer_global, global_max, maximizer_observed, observed_max = BO(
     f, modelSettings, chosen_settings, warmStart
+);
+
+# If prior and template GP is used:
+warmStart = (X_final, y_final)
+# Note: The BO function returns maximizers, not minimizers
+@time gp_final, X_final, y_final, maximizer_global, global_max, maximizer_observed, observed_max = BO(
+    f, gp_template, modelSettings2, chosen_settings, warmStart
 );
 
 
