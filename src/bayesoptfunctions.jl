@@ -200,7 +200,7 @@ function posteriorMax(gp::GPE{X,Y,M,K,P}; n_starts=30) where {X,Y,M,P,K<:BOOP.Ga
             
             for i in 1:n_starts
                 x0 = starts[i]
-                res = optimize(sub_mean, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, Fminbox(LBFGS()); autodiff = :forward)
+                res = optimize(sub_mean, -1.0 * ones(n_cont), 1.0 * ones(n_cont), x0, NelderMead())
                 
                 curr_val = -Optim.minimum(res) # Invertera tillbaka
                 if curr_val > best_val
